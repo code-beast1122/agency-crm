@@ -76,7 +76,7 @@ def main():
                 font-family: 'Inter', sans-serif;
                 font-size: 0.75rem;
                 font-weight: 600;
-                color: #ffffff;
+                color: #1f1f1f;
                 background-color: #3b82f6;
                 padding: 0.25rem 0.75rem;
                 border-radius: 9999px;
