@@ -10,25 +10,30 @@ st.set_page_config(page_title="Agency CRM", page_icon="🏢", layout="wide")
 
 hide_st_style = """
 <style>
-    /* Hide the entire Streamlit header including the deploy button and menu */
-    header {visibility: hidden;}
-    [data-testid="stHeader"] {visibility: hidden;}
+    /* 1. Hide the entire Streamlit header */
+    [data-testid="stHeader"] {display: none !important;}
+    header {display: none !important;}
     
-    /* Hide the footer */
-    footer {visibility: hidden;}
+    /* 2. Hide the Streamlit footer */
+    footer {display: none !important;}
     
-    /* Hide the Deploy button just in case */
-    .stAppDeployButton {display:none;}
+    /* 3. Hide the Main Menu */
+    #MainMenu {display: none !important;}
+    [data-testid="stToolbar"] {display: none !important;}
     
-    /* Hide the main menu */
-    #MainMenu {visibility: hidden;}
-    [data-testid="stToolbar"] {visibility: hidden;}
-    
-    /* Hide the "Hosted with Streamlit" badge */
+    /* 4. Hide the "Hosted with Streamlit" Badge */
+    a[href^="https://streamlit.io/cloud"] {display: none !important;}
     .viewerBadge_container__1QSob {display: none !important;}
-    .viewerBadge_link__1S137 {display: none !important;}
-    [class^="viewerBadge_"] {display: none !important;}
-    [class^="st-emotion-cache-"] > a > div > span {display: none !important;}
+    
+    /* 5. Hide the Deploy Button specifically */
+    [data-testid="stAppDeployButton"] {display: none !important;}
+    .stAppDeployButton {display: none !important;}
+    
+    /* 6. Catch-all for any other Streamlit floating buttons in the bottom right */
+    [data-testid="manage-app-button"] {display: none !important;}
+    
+    /* 7. Hide status widgets (running/stopping) if they appear */
+    [data-testid="stStatusWidget"] {display: none !important;}
 </style>
 """
 st.markdown(hide_st_style, unsafe_allow_html=True)
