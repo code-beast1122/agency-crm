@@ -126,11 +126,13 @@ def render(user):
         
         st.write("### Create Internal Task")
         all_projects = get_all_projects()
-        if all_projects:
+        active_projects = [p for p in all_projects if p.get("status") not in ["cancelled", "completed"]] if all_projects else []
+        
+        if active_projects:
             with st.form("create_internal_task_form"):
                 col1, col2 = st.columns(2)
                 with col1:
-                    proj_options = {f"{p['title']} ({p['clients']['company_name']})": p["id"] for p in all_projects}
+                    proj_options = {f"{p['title']} ({p['clients']['company_name']})": p["id"] for p in active_projects}
                     selected_proj_title = st.selectbox("Select Project", list(proj_options.keys()))
                     new_task_title = st.text_input("Task Title")
                     new_task_desc = st.text_area("Description")

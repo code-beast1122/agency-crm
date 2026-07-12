@@ -56,47 +56,51 @@ def render(user):
                 # Form to request new tasks
                 st.write("---")
                 st.write("### Request New Task")
-                with st.form(f"request_task_form_{project['id']}"):
-                    task_title = st.text_input("Task Title")
-                    task_description = st.text_area("Description")
-                    
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        task_deadline = st.date_input("Deadline Date", value=None)
-                    with col2:
-                        task_file = st.file_uploader("Attach File (Optional)", type=["png", "jpg", "jpeg", "pdf", "doc", "docx", "zip", "txt", "csv", "xlsx"])
+                
+                if project.get("status") in ["cancelled", "completed"]:
+                    st.info(f"This project is currently marked as **{project.get('status')}**. You cannot request new tasks for it.")
+                else:
+                    with st.form(f"request_task_form_{project['id']}"):
+                        task_title = st.text_input("Task Title")
+                        task_description = st.text_area("Description")
                         
-                    submitted = st.form_submit_button("Submit Request")
-                    
-                    if submitted:
-                        if task_title:
-                            file_url = None
-                            if task_file:
-                                import uuid
-                                file_ext = task_file.name.split('.')[-1]
-                                file_name = f"client_task_{uuid.uuid4().hex}.{file_ext}"
-                                
-                                try:
-                                    supabase.storage.from_("documents").upload(
-                                        file_name,
-                                        task_file.getvalue(),
-                                        {"content-type": task_file.type, "upsert": "true"}
-                                    )
-                                    file_url = supabase.storage.from_("documents").get_public_url(file_name)
-                                except Exception as e:
-                                    st.error(f"Failed to upload file: {e}")
-                                    
-                            deadline_str = task_deadline.isoformat() if task_deadline else None
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            task_deadline = st.date_input("Deadline Date", value=None)
+                        with col2:
+                            task_file = st.file_uploader("Attach File (Optional)", type=["png", "jpg", "jpeg", "pdf", "doc", "docx", "zip", "txt", "csv", "xlsx"])
                             
-                            create_task(
-                                project["id"], 
-                                task_title, 
-                                task_description, 
-                                "client_request", 
-                                deadline_str, 
-                                file_url
-                            )
-                            st.success("Task request submitted successfully!")
-                            st.rerun()
-                        else:
-                            st.warning("Please provide a task title.")
+                        submitted = st.form_submit_button("Submit Request")
+                        
+                        if submitted:
+                            if task_title:
+                                file_url = None
+                                if task_file:
+                                    import uuid
+                                    file_ext = task_file.name.split('.')[-1]
+                                    file_name = f"client_task_{uuid.uuid4().hex}.{file_ext}"
+                                    
+                                    try:
+                                        supabase.storage.from_("documents").upload(
+                                            file_name,
+                                            task_file.getvalue(),
+                                            {"content-type": task_file.type, "upsert": "true"}
+                                        )
+                                        file_url = supabase.storage.from_("documents").get_public_url(file_name)
+                                    except Exception as e:
+                                        st.error(f"Failed to upload file: {e}")
+                                        
+                                deadline_str = task_deadline.isoformat() if task_deadline else None
+                                
+                                create_task(
+                                    project_id=project["id"],
+                                    title=task_title,
+                                    description=task_description,
+                                    source="client",
+                                    deadline=deadline_str,
+                                    image_url=file_url
+                                )
+                                st.success("Task requested successfully!")
+                                st.rerun()
+                            else:
+                                st.error("Task title is required.")
