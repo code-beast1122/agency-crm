@@ -8,6 +8,23 @@ import views.employee_dashboard as employee_dashboard
 
 st.set_page_config(page_title="Agency CRM", page_icon="🏢", layout="wide")
 
+hide_st_style = """
+<style>
+    /* Hide the entire Streamlit header including the deploy button and menu */
+    header {visibility: hidden;}
+    
+    /* Hide the footer */
+    footer {visibility: hidden;}
+    
+    /* Hide the Deploy button just in case */
+    .stAppDeployButton {display:none;}
+    
+    /* Hide the main menu */
+    #MainMenu {visibility: hidden;}
+</style>
+"""
+st.markdown(hide_st_style, unsafe_allow_html=True)
+
 def login():
     st.title("Agency CRM Login")
     st.write("Please enter your Access Code to continue.")
