@@ -25,6 +25,8 @@ def login():
             border: none;
             border-radius: 30px;
             padding: 40px;
+            margin: 0 auto;
+            max-width: 450px;
             box-shadow: 0 20px 40px -10px rgba(0,0,0,0.5), 0 0 40px rgba(14, 165, 233, 0.15);
         }
         
@@ -65,33 +67,28 @@ def login():
     </style>
     """, unsafe_allow_html=True)
     
-    col1, col2, col3 = st.columns([1, 1.2, 1])
-    with col2:
-        with st.form("login_form", clear_on_submit=False):
-            st.markdown("<h1 style='text-align: center; color: #0ea5e9; font-size: 2.8rem; font-weight: 800; margin-bottom: 0;'>Sign In</h1>", unsafe_allow_html=True)
-            st.markdown("<p style='text-align: center; color: #94a3b8; margin-bottom: 2rem;'>Enter your Access Code</p>", unsafe_allow_html=True)
-            
-            access_code = st.text_input("Access Code", type="password", label_visibility="collapsed", placeholder="Access Code")
-            
-            # Spacing
-            st.write("")
-            st.write("")
-            
-            submitted = st.form_submit_button("Sign In", use_container_width=True)
-            
-            # Dummy links
-            st.markdown("<div style='text-align: center; margin-top: 1rem;'><a href='#' style='color: #0ea5e9; font-size: 0.85rem; text-decoration: none;'>Forgot Password?</a></div>", unsafe_allow_html=True)
-            
-            if submitted:
-                if access_code:
-                    profile = get_profile_by_code(access_code)
-                    if profile:
-                        st.session_state["user"] = profile
-                        st.rerun()
-                    else:
-                        st.error("Invalid Access Code. Please try again.")
+    with st.form("login_form", clear_on_submit=False):
+        st.markdown("<h1 style='text-align: center; color: #0ea5e9; font-size: 2.8rem; font-weight: 800; margin-bottom: 0;'>Sign In</h1>", unsafe_allow_html=True)
+        st.markdown("<p style='text-align: center; color: #94a3b8; margin-bottom: 2rem;'>Enter your Access Code</p>", unsafe_allow_html=True)
+        
+        access_code = st.text_input("Access Code", type="password", label_visibility="collapsed", placeholder="Access Code")
+        
+        # Spacing
+        st.write("")
+        st.write("")
+        
+        submitted = st.form_submit_button("Sign In", use_container_width=True)
+        
+        if submitted:
+            if access_code:
+                profile = get_profile_by_code(access_code)
+                if profile:
+                    st.session_state["user"] = profile
+                    st.rerun()
                 else:
-                    st.warning("Please enter an Access Code.")
+                    st.error("Invalid Access Code. Please try again.")
+            else:
+                st.warning("Please enter an Access Code.")
 
 def main():
     if "user" not in st.session_state:
