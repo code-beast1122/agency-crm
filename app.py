@@ -8,35 +8,6 @@ import views.employee_dashboard as employee_dashboard
 
 st.set_page_config(page_title="Agency CRM", page_icon="🏢", layout="wide")
 
-hide_st_style = """
-<style>
-    /* 1. Hide the entire Streamlit header */
-    [data-testid="stHeader"] {display: none !important;}
-    header {display: none !important;}
-    
-    /* 2. Hide the Streamlit footer */
-    footer {display: none !important;}
-    
-    /* 3. Hide the Main Menu */
-    #MainMenu {display: none !important;}
-    [data-testid="stToolbar"] {display: none !important;}
-    
-    /* 4. Hide the "Hosted with Streamlit" Badge */
-    a[href^="https://streamlit.io/cloud"] {display: none !important;}
-    .viewerBadge_container__1QSob {display: none !important;}
-    
-    /* 5. Hide the Deploy Button specifically */
-    [data-testid="stAppDeployButton"] {display: none !important;}
-    .stAppDeployButton {display: none !important;}
-    
-    /* 6. Catch-all for any other Streamlit floating buttons in the bottom right */
-    [data-testid="manage-app-button"] {display: none !important;}
-    
-    /* 7. Hide status widgets (running/stopping) if they appear */
-    [data-testid="stStatusWidget"] {display: none !important;}
-</style>
-"""
-st.markdown(hide_st_style, unsafe_allow_html=True)
 
 def login():
     st.title("Agency CRM Login")
