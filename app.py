@@ -12,6 +12,7 @@ hide_st_style = """
 <style>
     /* Hide the entire Streamlit header including the deploy button and menu */
     header {visibility: hidden;}
+    [data-testid="stHeader"] {visibility: hidden;}
     
     /* Hide the footer */
     footer {visibility: hidden;}
@@ -21,6 +22,13 @@ hide_st_style = """
     
     /* Hide the main menu */
     #MainMenu {visibility: hidden;}
+    [data-testid="stToolbar"] {visibility: hidden;}
+    
+    /* Hide the "Hosted with Streamlit" badge */
+    .viewerBadge_container__1QSob {display: none !important;}
+    .viewerBadge_link__1S137 {display: none !important;}
+    [class^="viewerBadge_"] {display: none !important;}
+    [class^="st-emotion-cache-"] > a > div > span {display: none !important;}
 </style>
 """
 st.markdown(hide_st_style, unsafe_allow_html=True)
