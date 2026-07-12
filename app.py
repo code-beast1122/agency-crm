@@ -10,23 +10,88 @@ st.set_page_config(page_title="Agency CRM", page_icon="🏢", layout="wide")
 
 
 def login():
-    st.title("Agency CRM Login")
-    st.write("Please enter your Access Code to continue.")
-    
-    with st.form("login_form"):
-        access_code = st.text_input("Access Code", type="password")
-        submitted = st.form_submit_button("Login")
+    # Inject CSS strictly for the login page
+    st.markdown("""
+    <style>
+        /* Center the login container */
+        .block-container {
+            max-width: 100%;
+            padding-top: 5rem;
+        }
         
-        if submitted:
-            if access_code:
-                profile = get_profile_by_code(access_code)
-                if profile:
-                    st.session_state["user"] = profile
-                    st.rerun()
+        /* The Card */
+        [data-testid="stForm"] {
+            background-color: #1a1c23;
+            border: none;
+            border-radius: 30px;
+            padding: 40px;
+            box-shadow: 0 20px 40px -10px rgba(0,0,0,0.5), 0 0 40px rgba(14, 165, 233, 0.15);
+        }
+        
+        /* Input Field Styling */
+        [data-testid="stTextInput"] input {
+            border-radius: 9999px;
+            background-color: #262932;
+            border: 1px solid #333842;
+            color: white;
+            padding: 15px 20px;
+            font-size: 1rem;
+            box-shadow: inset 0 2px 4px rgba(0,0,0,0.1);
+        }
+        [data-testid="stTextInput"] input:focus {
+            border-color: #0ea5e9;
+            box-shadow: 0 0 10px rgba(14, 165, 233, 0.3), inset 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        /* Button Styling */
+        [data-testid="stFormSubmitButton"] button {
+            border-radius: 9999px;
+            background: linear-gradient(135deg, #0284c7 0%, #0ea5e9 100%);
+            border: none;
+            color: white !important;
+            font-weight: 700;
+            font-size: 1.1rem;
+            padding: 10px 0;
+            box-shadow: 0 10px 20px -5px rgba(14, 165, 233, 0.5);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        [data-testid="stFormSubmitButton"] button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 15px 25px -5px rgba(14, 165, 233, 0.6);
+        }
+        [data-testid="stFormSubmitButton"] button p {
+            color: white !important;
+        }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    col1, col2, col3 = st.columns([1, 1.2, 1])
+    with col2:
+        with st.form("login_form", clear_on_submit=False):
+            st.markdown("<h1 style='text-align: center; color: #0ea5e9; font-size: 2.8rem; font-weight: 800; margin-bottom: 0;'>Sign In</h1>", unsafe_allow_html=True)
+            st.markdown("<p style='text-align: center; color: #94a3b8; margin-bottom: 2rem;'>Enter your Access Code</p>", unsafe_allow_html=True)
+            
+            access_code = st.text_input("Access Code", type="password", label_visibility="collapsed", placeholder="Access Code")
+            
+            # Spacing
+            st.write("")
+            st.write("")
+            
+            submitted = st.form_submit_button("Sign In", use_container_width=True)
+            
+            # Dummy links
+            st.markdown("<div style='text-align: center; margin-top: 1rem;'><a href='#' style='color: #0ea5e9; font-size: 0.85rem; text-decoration: none;'>Forgot Password?</a></div>", unsafe_allow_html=True)
+            
+            if submitted:
+                if access_code:
+                    profile = get_profile_by_code(access_code)
+                    if profile:
+                        st.session_state["user"] = profile
+                        st.rerun()
+                    else:
+                        st.error("Invalid Access Code. Please try again.")
                 else:
-                    st.error("Invalid Access Code. Please try again.")
-            else:
-                st.warning("Please enter an Access Code.")
+                    st.warning("Please enter an Access Code.")
 
 def main():
     if "user" not in st.session_state:
