@@ -38,10 +38,10 @@ def main():
         # Inject custom CSS for a beautiful sidebar
         st.markdown("""
         <style>
-            /* Make the sidebar background slightly distinct and add a subtle border */
+            /* Make the sidebar background distinct and match dark mode */
             [data-testid="stSidebar"] {
-                background-color: #f8f9fa;
-                border-right: 1px solid #e5e7eb;
+                background-color: #1f1f1f;
+                border-right: 1px solid #333333;
             }
             
             /* Profile Card Container */
@@ -49,7 +49,7 @@ def main():
                 text-align: center;
                 padding-bottom: 1.5rem;
                 margin-bottom: 1.5rem;
-                border-bottom: 1px solid #e5e7eb;
+                border-bottom: 1px solid #333333;
             }
             
             /* Circular Avatar */
@@ -58,8 +58,8 @@ def main():
                 height: 90px;
                 border-radius: 50%;
                 margin-bottom: 1rem;
-                border: 3px solid #ffffff;
-                box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+                border: 3px solid #333333;
+                box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -1px rgba(0, 0, 0, 0.18);
             }
             
             /* User Name */
@@ -67,7 +67,7 @@ def main():
                 font-family: 'Inter', sans-serif;
                 font-size: 1.25rem;
                 font-weight: 700;
-                color: #1f2937;
+                color: #ffffff;
                 margin-bottom: 0.25rem;
             }
             
