@@ -75,14 +75,16 @@ def main():
             .sidebar-role {
                 font-family: 'Inter', sans-serif;
                 font-size: 0.75rem;
-                font-weight: 600;
-                color: #1f1f1f;
-                background-color: #3b82f6;
+                font-weight: 700;
+                color: #60a5fa;
+                background-color: rgba(59, 130, 246, 0.15);
+                border: 1px solid rgba(59, 130, 246, 0.3);
                 padding: 0.25rem 0.75rem;
                 border-radius: 9999px;
                 display: inline-block;
                 text-transform: uppercase;
                 letter-spacing: 0.05em;
+                box-shadow: 0 0 10px rgba(59, 130, 246, 0.1);
             }
             
             /* Adjust the main content to breathe a bit more */
