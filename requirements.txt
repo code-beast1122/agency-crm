@@ -2,3 +2,4 @@ streamlit
 supabase
 python-dotenv
 pandas
+streamlit-cookies-controller

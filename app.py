@@ -1,5 +1,9 @@
 import streamlit as st
 from utils.db import get_profile_by_code
+from streamlit_cookies_controller import CookieController
+
+# Initialize cookie controller
+controller = CookieController()
 
 # We will import views dynamically or ensure they are present
 import views.client_portal as client_portal
@@ -84,6 +88,7 @@ def login():
                 profile = get_profile_by_code(access_code)
                 if profile:
                     st.session_state["user"] = profile
+                    controller.set("login_code", access_code, max_age=86400 * 30) # 30 days
                     st.rerun()
                 else:
                     st.error("Invalid Access Code. Please try again.")
@@ -92,7 +97,17 @@ def login():
 
 def main():
     if "user" not in st.session_state:
-        login()
+        # Check if we have a cookie
+        saved_code = controller.get("login_code")
+        if saved_code:
+            profile = get_profile_by_code(saved_code)
+            if profile:
+                st.session_state["user"] = profile
+                st.rerun()
+            else:
+                login()
+        else:
+            login()
     else:
         user = st.session_state["user"]
         role = user.get("role")
@@ -175,6 +190,7 @@ def main():
         
         # A full-width, clean logout button
         if st.sidebar.button("Logout", use_container_width=True, type="primary"):
+            controller.remove("login_code")
             del st.session_state["user"]
             st.rerun()
             
