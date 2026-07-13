@@ -102,7 +102,7 @@ def login():
             del st.session_state["login_error"]
 
 def main():
-    if "user" not in st.session_state:
+    if "user" not in st.session_state and not st.session_state.get("just_logged_out"):
         saved_code = st.context.cookies.get("login_code")
         if saved_code:
             profile = get_profile_by_code(saved_code)
