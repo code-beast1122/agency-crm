@@ -37,10 +37,6 @@ def render(user):
                     st.write("**Client Details**")
                     client_name = st.text_input("Contact Full Name")
                     company_name = st.text_input("Company Name")
-                    # Generate a random login code
-                    default_code = str(uuid.uuid4()).split('-')[0]
-                    login_code = st.text_input("Access Code", value=default_code)
-                    
                 with col2:
                     st.write("**Project Details**")
                     project_title = st.text_input("Project Title")
@@ -49,12 +45,12 @@ def render(user):
                 submitted = st.form_submit_button("Create Client & Project")
                 
                 if submitted:
-                    if not (client_name and company_name and login_code and project_title):
+                    if not (client_name and company_name and project_title):
                         st.error("Please fill in all text fields.")
                     else:
                         try:
                             # 1. Create Profile
-                            profile = create_profile(client_name, "client", login_code)
+                            profile = create_profile(client_name, "client")
                             
                             # 2. Create Client
                             client = create_client_record(profile["id"], company_name)
@@ -76,7 +72,7 @@ def render(user):
                                 public_url = supabase.storage.from_("documents").get_public_url(file_name)
                                 create_proposal(project["id"], public_url)
                                 
-                            st.success(f"Successfully onboarded {company_name}! Their access code is: {login_code}")
+                            st.success(f"Successfully onboarded {company_name}! Their access code is: {profile['login_code']}")
                         except Exception as e:
                             st.error(f"Error during onboarding: {str(e)}")
                             
@@ -290,10 +286,6 @@ def render(user):
             col1, col2 = st.columns(2)
             with col1:
                 emp_name = st.text_input("Full Name")
-                # Generate a random login code
-                emp_code = str(uuid.uuid4()).split('-')[0]
-                emp_login_code = st.text_input("Access Code", value=emp_code)
-                
             with col2:
                 emp_dept = st.text_input("Department")
                 emp_desig = st.text_input("Designation")
@@ -301,17 +293,17 @@ def render(user):
             submitted_emp = st.form_submit_button("Add Employee")
             
             if submitted_emp:
-                if not (emp_name and emp_login_code and emp_dept and emp_desig):
+                if not (emp_name and emp_dept and emp_desig):
                     st.error("Please fill in all fields.")
                 else:
                     try:
                         # 1. Create Profile
-                        emp_profile = create_profile(emp_name, "employee", emp_login_code)
+                        emp_profile = create_profile(emp_name, "employee")
                         
                         # 2. Create Employee record
                         create_employee_record(emp_profile["id"], emp_dept, emp_desig)
                         
-                        st.success(f"Successfully added {emp_name}! Their access code is: {emp_login_code}")
+                        st.success(f"Successfully added {emp_name}! Their access code is: {emp_profile['login_code']}")
                     except Exception as e:
                         st.error(f"Error adding employee: {str(e)}")
 

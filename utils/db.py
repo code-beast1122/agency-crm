@@ -104,13 +104,16 @@ def create_proposal(project_id: str, file_url: str):
     }).execute()
     return response.data[0]
 
-def create_profile(full_name: str, role: str, login_code: str):
+def create_profile(full_name: str, role: str, login_code: str = None):
     """Create a profile."""
-    response = supabase.table("profiles").insert({
+    payload = {
         "full_name": full_name,
         "role": role,
-        "login_code": login_code
-    }).execute()
+    }
+    if login_code:
+        payload["login_code"] = login_code
+        
+    response = supabase.table("profiles").insert(payload).execute()
     return response.data[0]
 
 def create_task(project_id: str, title: str, description: str, source: str = "internal", deadline: str = None, image_url: str = None, estimated_hours: float = 0.0):

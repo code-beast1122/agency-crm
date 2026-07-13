@@ -1,4 +1,5 @@
 import streamlit as st
+import re
 from utils.db import get_profile_by_code
 from streamlit_cookies_controller import CookieController
 
@@ -6,6 +7,10 @@ controller = CookieController()
 def handle_login():
     access_code = st.session_state.get("access_code_input")
     if access_code:
+        if not re.match(r"^cs-\d{6}-\d{3}$", access_code):
+            st.session_state["login_error"] = "Invalid Format. Must be cs-XXXXXX-YYY"
+            return
+            
         profile = get_profile_by_code(access_code)
         if profile:
             st.session_state["user"] = profile
@@ -24,7 +29,7 @@ import views.client_portal as client_portal
 import views.manager_dashboard as manager_dashboard
 import views.employee_dashboard as employee_dashboard
 
-st.set_page_config(page_title="Agency CRM", page_icon="🏢", layout="wide")
+st.set_page_config(page_title="ClixoSoft CRM", page_icon="🏢", layout="wide")
 
 
 def login():
