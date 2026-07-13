@@ -13,7 +13,8 @@ from utils.db import (
     create_employee_record,
     create_task,
     get_all_clients,
-    update_project
+    update_project,
+    get_total_time_logged
 )
 import uuid
 
@@ -150,12 +151,12 @@ def render(user):
                             file_ext = new_task_file.name.split('.')[-1]
                             file_name = f"manager_task_{uuid.uuid4().hex}.{file_ext}"
                             try:
-                                supabase.storage.from_("documents").upload(
+                                supabase.storage.from_("task_images").upload(
                                     file_name,
                                     new_task_file.getvalue(),
                                     {"content-type": new_task_file.type, "upsert": "true"}
                                 )
-                                file_url = supabase.storage.from_("documents").get_public_url(file_name)
+                                file_url = supabase.storage.from_("task_images").get_public_url(file_name)
                             except Exception as e:
                                 st.error(f"Failed to upload file: {e}")
                                 
@@ -192,8 +193,14 @@ def render(user):
                 
             for task in tasks:
                 with st.expander(f"{task['title']} - {task['projects']['title']} ({task['status']})"):
+                    total_tracked = get_total_time_logged(task['id'])
                     st.write(f"**Description:** {task['description']}")
                     st.write(f"**Source:** {task['task_source']}")
+                    st.write(f"**Tracked Time:** {total_tracked:.2f} hrs (Manually Logged: {task.get('actual_hours', 0)} hrs)")
+                    if task.get('image_url'):
+                        st.markdown(f"**Your Attachment:** [View/Download File]({task['image_url']})")
+                    if task.get('employee_image_url'):
+                        st.markdown(f"**Employee Attachment:** [View/Download File]({task['employee_image_url']})")
                     
                     with st.form(f"dispatch_form_{task['id']}"):
                         col1, col2 = st.columns(2)

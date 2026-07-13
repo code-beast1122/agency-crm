@@ -1,7 +1,13 @@
 import streamlit as st
 import pandas as pd
-from utils.db import supabase, update_task
-
+from utils.db import (
+    supabase, 
+    update_task, 
+    start_task_timer, 
+    stop_task_timer, 
+    get_active_timer, 
+    get_total_time_logged
+)
 def render(user):
     st.header("Employee Dashboard")
     
@@ -29,13 +35,37 @@ def render(user):
         with st.expander(f"{task['title']} - {task['projects']['title']} ({task['status']})"):
             st.write(f"**Description:** {task['description']}")
             st.write(f"**Estimated Hours:** {task['estimated_hours']}")
+            if task.get('image_url'):
+                st.markdown(f"**Manager Attachment:** [View/Download File]({task['image_url']})")
+            if task.get('employee_image_url'):
+                st.markdown(f"**Your Attachment:** [View/Download File]({task['employee_image_url']})")
+            
+            # Time Tracking UI
+            active_timer = get_active_timer(task['id'], employee_id)
+            total_logged = get_total_time_logged(task['id'])
+            
+            col_t1, col_t2 = st.columns(2)
+            with col_t1:
+                st.write(f"**Total Tracked Time:** {total_logged:.2f} hrs")
+            with col_t2:
+                if active_timer:
+                    if st.button("Stop Work", key=f"stop_{task['id']}", type="primary"):
+                        stop_task_timer(active_timer['id'])
+                        new_total = get_total_time_logged(task['id'])
+                        update_task(task['id'], {"actual_hours": new_total})
+                        st.rerun()
+                else:
+                    if st.button("Start Work", key=f"start_{task['id']}"):
+                        start_task_timer(task['id'], employee_id)
+                        st.rerun()
+            
+            st.write("---")
             
             with st.form(f"update_task_form_{task['id']}"):
                 col1, col2 = st.columns(2)
                 
                 with col1:
                     new_status = st.selectbox("Status", ["todo", "in_progress", "review", "done"], index=["todo", "in_progress", "review", "done"].index(task['status']))
-                    actual_hours = st.number_input("Actual Hours", min_value=0.0, value=float(task['actual_hours']), step=0.5)
                     
                 with col2:
                     task_file = st.file_uploader("Upload Progress File", type=["png", "jpg", "jpeg", "pdf", "doc", "docx", "zip", "txt", "csv", "xlsx"])
@@ -45,25 +75,25 @@ def render(user):
                 if submitted:
                     updates = {
                         "status": new_status,
-                        "actual_hours": actual_hours
+                        "actual_hours": total_logged
                     }
                     
                     if task_file:
                         try:
                             # Upload to Supabase Storage
                             file_ext = task_file.name.split('.')[-1]
-                            file_name = f"task_{task['id']}.{file_ext}"
+                            file_name = f"task_{task['id']}_emp.{file_ext}"
                             
                             # Upload file. Use upsert so it overwrites if an image already exists.
-                            res = supabase.storage.from_("documents").upload(
+                            res = supabase.storage.from_("task_images").upload(
                                 file_name, 
                                 task_file.getvalue(), 
                                 {"content-type": task_file.type, "upsert": "true"}
                             )
                             
                             # Get public URL
-                            public_url = supabase.storage.from_("documents").get_public_url(file_name)
-                            updates["image_url"] = public_url
+                            public_url = supabase.storage.from_("task_images").get_public_url(file_name)
+                            updates["employee_image_url"] = public_url
                         except Exception as e:
                             st.error(f"Failed to upload file: {str(e)}")
                             

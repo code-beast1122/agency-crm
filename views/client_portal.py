@@ -45,11 +45,20 @@ def render(user):
                     st.write(f"{done_tasks} / {total_tasks} tasks completed ({int(completion * 100)}%)")
                     
                     # Show tasks
-                    df = pd.DataFrame(tasks)
-                    columns_to_show = ["title", "status", "task_source", "estimated_hours"]
-                    if "deadline" in df.columns:
-                        columns_to_show.append("deadline")
-                    st.dataframe(df[columns_to_show], hide_index=True)
+                    st.write("### Task Details")
+                    for task in tasks:
+                        with st.expander(f"{task['title']} ({task['status']})"):
+                            st.write(f"**Description:** {task['description']}")
+                            st.write(f"**Source:** {task['task_source']}")
+                            if task.get('estimated_hours'):
+                                st.write(f"**Estimated Hours:** {task['estimated_hours']}")
+                            if task.get('deadline'):
+                                st.write(f"**Deadline:** {task['deadline']}")
+                                
+                            if task.get('image_url'):
+                                st.markdown(f"**Initial Attachment:** [View/Download File]({task['image_url']})")
+                            if task.get('employee_image_url'):
+                                st.markdown(f"**Progress Update:** [View/Download File]({task['employee_image_url']})")
                 else:
                     st.write("No tasks found for this project yet.")
                 
@@ -81,12 +90,12 @@ def render(user):
                                     file_name = f"client_task_{uuid.uuid4().hex}.{file_ext}"
                                     
                                     try:
-                                        supabase.storage.from_("documents").upload(
+                                        supabase.storage.from_("task_images").upload(
                                             file_name,
                                             task_file.getvalue(),
                                             {"content-type": task_file.type, "upsert": "true"}
                                         )
-                                        file_url = supabase.storage.from_("documents").get_public_url(file_name)
+                                        file_url = supabase.storage.from_("task_images").get_public_url(file_name)
                                     except Exception as e:
                                         st.error(f"Failed to upload file: {e}")
                                         
@@ -96,7 +105,7 @@ def render(user):
                                     project_id=project["id"],
                                     title=task_title,
                                     description=task_description,
-                                    source="client",
+                                    source="client_request",
                                     deadline=deadline_str,
                                     image_url=file_url
                                 )

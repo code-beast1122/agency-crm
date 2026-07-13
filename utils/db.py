@@ -2,6 +2,7 @@ import os
 import streamlit as st
 from supabase import create_client, Client
 from dotenv import load_dotenv
+from datetime import datetime, timezone
 
 load_dotenv()
 
@@ -128,3 +129,38 @@ def create_task(project_id: str, title: str, description: str, source: str = "in
         
     response = supabase.table("tasks").insert(payload).execute()
     return response.data[0]
+
+def start_task_timer(task_id: str, employee_id: str):
+    """Start a timer for a task."""
+    response = supabase.table("time_logs").insert({
+        "task_id": task_id,
+        "employee_id": employee_id
+    }).execute()
+    return response.data[0] if response.data else None
+
+def stop_task_timer(time_log_id: str):
+    """Stop a timer by ID."""
+    now = datetime.now(timezone.utc).isoformat()
+    response = supabase.table("time_logs").update({"end_time": now}).eq("id", time_log_id).execute()
+    return response.data[0] if response.data else None
+
+def get_active_timer(task_id: str, employee_id: str):
+    """Get active timer for an employee on a task."""
+    response = supabase.table("time_logs").select("*").eq("task_id", task_id).eq("employee_id", employee_id).is_("end_time", "null").execute()
+    if response.data:
+        return response.data[0]
+    return None
+
+def get_total_time_logged(task_id: str):
+    """Calculate total duration logged for a task in hours."""
+    response = supabase.table("time_logs").select("*").eq("task_id", task_id).not_.is_("end_time", "null").execute()
+    total_hours = 0.0
+    for log in response.data:
+        try:
+            start = datetime.fromisoformat(log["start_time"].replace("Z", "+00:00"))
+            end = datetime.fromisoformat(log["end_time"].replace("Z", "+00:00"))
+            duration = end - start
+            total_hours += duration.total_seconds() / 3600.0
+        except Exception:
+            pass # Skip invalid dates
+    return total_hours
