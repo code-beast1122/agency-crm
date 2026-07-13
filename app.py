@@ -2,10 +2,24 @@ import streamlit as st
 from utils.db import get_profile_by_code
 from streamlit_cookies_controller import CookieController
 
-# Initialize cookie controller
 controller = CookieController()
+def handle_login():
+    access_code = st.session_state.get("access_code_input")
+    if access_code:
+        profile = get_profile_by_code(access_code)
+        if profile:
+            st.session_state["user"] = profile
+            st.session_state["just_logged_in"] = access_code
+        else:
+            st.session_state["login_error"] = "Invalid Access Code. Please try again."
+    else:
+        st.session_state["login_error"] = "Please enter an Access Code."
 
-# We will import views dynamically or ensure they are present
+def handle_logout():
+    if "user" in st.session_state:
+        del st.session_state["user"]
+    st.session_state["just_logged_out"] = True
+
 import views.client_portal as client_portal
 import views.manager_dashboard as manager_dashboard
 import views.employee_dashboard as employee_dashboard
@@ -75,40 +89,37 @@ def login():
         st.markdown("<h1 style='text-align: center; color: #0ea5e9; font-size: 2.8rem; font-weight: 800; margin-bottom: 0;'>Sign In</h1>", unsafe_allow_html=True)
         st.markdown("<p style='text-align: center; color: #94a3b8; margin-bottom: 2rem;'>Enter your Access Code</p>", unsafe_allow_html=True)
         
-        access_code = st.text_input("Access Code", type="password", label_visibility="collapsed", placeholder="Access Code")
+        st.text_input("Access Code", type="password", key="access_code_input", label_visibility="collapsed", placeholder="Access Code")
         
         # Spacing
         st.write("")
         st.write("")
         
-        submitted = st.form_submit_button("Sign In", use_container_width=True)
+        st.form_submit_button("Sign In", use_container_width=True, on_click=handle_login)
         
-        if submitted:
-            if access_code:
-                profile = get_profile_by_code(access_code)
-                if profile:
-                    st.session_state["user"] = profile
-                    controller.set("login_code", access_code, max_age=86400 * 30) # 30 days
-                    st.rerun()
-                else:
-                    st.error("Invalid Access Code. Please try again.")
-            else:
-                st.warning("Please enter an Access Code.")
+        if "login_error" in st.session_state:
+            st.error(st.session_state["login_error"])
+            del st.session_state["login_error"]
 
 def main():
     if "user" not in st.session_state:
-        # Check if we have a cookie
-        saved_code = controller.get("login_code")
+        saved_code = st.context.cookies.get("login_code")
         if saved_code:
             profile = get_profile_by_code(saved_code)
             if profile:
                 st.session_state["user"] = profile
-                st.rerun()
-            else:
-                login()
-        else:
-            login()
+
+    if "user" not in st.session_state:
+        if st.session_state.get("just_logged_out"):
+            controller.remove("login_code")
+            del st.session_state["just_logged_out"]
+        login()
     else:
+        if st.session_state.get("just_logged_in"):
+            code = st.session_state["just_logged_in"]
+            controller.set("login_code", code, max_age=86400 * 30)
+            del st.session_state["just_logged_in"]
+            
         user = st.session_state["user"]
         role = user.get("role")
         
@@ -189,10 +200,7 @@ def main():
         st.sidebar.write("")
         
         # A full-width, clean logout button
-        if st.sidebar.button("Logout", use_container_width=True, type="primary"):
-            controller.remove("login_code")
-            del st.session_state["user"]
-            st.rerun()
+        st.sidebar.button("Logout", use_container_width=True, type="primary", on_click=handle_logout)
             
         if role == "client":
             client_portal.render(user)
