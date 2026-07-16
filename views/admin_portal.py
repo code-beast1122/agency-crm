@@ -346,8 +346,8 @@ def render_ai_assistant():
                     try:
                         import json
                         db_dump = {
-                            "profiles": supabase.table("profiles").select("full_name, role, login_code, created_at").execute().data,
-                            "departments": supabase.table("departments").select("name").execute().data,
+                            "profiles": supabase.table("profiles").select("id, full_name, role, login_code, created_at").execute().data,
+                            "departments": supabase.table("departments").select("id, name").execute().data,
                             "projects": supabase.table("projects").select("id, client_id, title, status, created_at").execute().data,
                             "tasks": supabase.table("tasks").select("id, project_id, assigned_to, title, description, task_source, status, estimated_hours, actual_hours, task_type, deadline, created_at").execute().data,
                             "clients": supabase.table("clients").select("id, profile_id, company_name, created_at").execute().data,
@@ -365,7 +365,8 @@ def render_ai_assistant():
                         stats_str = "Could not load current DB stats."
                         
                     sys_prompt = f"You are a helpful CRM Data Analyst for an agency. You analyze departments, projects, and employees. " \
-                                 f"Do NOT invent or hallucinate names. ONLY use the names provided in the context. Also dont include information like id. instead of mentioning id mention name " \
+                                 f"Do NOT invent or hallucinate names. ONLY use the names provided in the context. " \
+                                 f"Also dont include information like id. instead of mentioning id mention name " \
                                  f"Use the following real-time data to answer the user's questions:\n{stats_str}"
                     
                     messages = [{"role": "system", "content": sys_prompt}]
