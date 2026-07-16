@@ -365,7 +365,7 @@ def render_ai_assistant():
                         stats_str = "Could not load current DB stats."
                         
                     sys_prompt = f"You are a helpful CRM Data Analyst for an agency. You analyze departments, projects, and employees. " \
-                                 f"Do NOT invent or hallucinate names. ONLY use the names provided in the context. Also dont include information like id." \
+                                 f"Do NOT invent or hallucinate names. ONLY use the names provided in the context. Also dont include information like id. instead of mentioning id mention name " \
                                  f"Use the following real-time data to answer the user's questions:\n{stats_str}"
                     
                     messages = [{"role": "system", "content": sys_prompt}]
