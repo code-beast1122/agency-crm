@@ -1,7 +1,12 @@
 import streamlit as st
 import re
-from utils.db import get_profile_by_code
+from utils.db import get_profile_by_code, get_user_roles
 from streamlit_cookies_controller import CookieController
+import views.coordinator_portal as coordinator_portal
+import views.employee_dashboard as employee_dashboard
+import views.client_portal as client_portal
+import views.admin_portal as admin_portal
+import views.hod_portal as hod_portal
 
 controller = CookieController()
 def handle_login():
@@ -25,15 +30,10 @@ def handle_logout():
         del st.session_state["user"]
     st.session_state["just_logged_out"] = True
 
-import views.client_portal as client_portal
-import views.manager_dashboard as manager_dashboard
-import views.employee_dashboard as employee_dashboard
-
 st.set_page_config(page_title="ClixoSoft CRM", page_icon="🏢", layout="wide")
 
 
 def login():
-    # Inject CSS strictly for the login page
     st.markdown("""
     <style>
         /* Center the login container */
@@ -125,8 +125,22 @@ def main():
             controller.set("login_code", code, max_age=86400 * 30)
             del st.session_state["just_logged_in"]
             
+        # Main application logic for logged in user
         user = st.session_state["user"]
-        role = user.get("role")
+        
+        roles = get_user_roles(user["id"])
+        if not roles:
+            # Fallback to legacy enum role if not migrated yet
+            roles = [user.get("role")]
+            
+        # Role selection if multiple roles
+        if len(roles) > 1:
+            st.sidebar.markdown("### Switch Portal")
+            active_role = st.sidebar.radio("Select your role dashboard:", roles, format_func=lambda x: str(x).capitalize())
+        else:
+            active_role = roles[0] if roles else "Unknown"
+            
+        role_display = str(active_role).capitalize() if active_role else "Unknown"
         
         # Inject custom CSS for a beautiful sidebar
         st.markdown("""
@@ -196,7 +210,7 @@ def main():
         <div class="sidebar-profile">
             <img src="{avatar_url}" alt="Profile Picture">
             <div class="sidebar-name">{user.get('full_name')}</div>
-            <div class="sidebar-role">{role}</div>
+            <div class="sidebar-role">{role_display}</div>
         </div>
         """, unsafe_allow_html=True)
         
@@ -207,14 +221,18 @@ def main():
         # A full-width, clean logout button
         st.sidebar.button("Logout", use_container_width=True, type="primary", on_click=handle_logout)
             
-        if role == "client":
+        if active_role == "client":
             client_portal.render(user)
-        elif role in ["manager", "hr", "supervisor"]:
-            manager_dashboard.render(user)
-        elif role == "employee":
+        elif active_role in ["coordinator", "manager", "hr", "supervisor"]:
+            coordinator_portal.render(user)
+        elif active_role == "employee":
             employee_dashboard.render(user)
+        elif active_role == "admin":
+            admin_portal.render(user)
+        elif active_role == "hod":
+            hod_portal.render(user)
         else:
-            st.error(f"Unknown role: {role}")
+            st.error(f"Unknown role: {active_role}")
 
 if __name__ == "__main__":
     main()

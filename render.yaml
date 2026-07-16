@@ -8,5 +8,13 @@ services:
     envVars:
       - key: SUPABASE_URL
         sync: false
-      - key: ANON_KEY
+      - key: SERVICE_ROLE_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: CLOCKIFY_API_KEY
+        sync: false
+      - key: CLOCKIFY_WORKSPACE_ID
+        sync: false
+      - key: GOOGLE_CALENDAR_ID
         sync: false

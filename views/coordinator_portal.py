@@ -1,10 +1,10 @@
 import streamlit as st
 import pandas as pd
 from utils.db import (
-    supabase, 
-    get_all_projects, 
-    get_all_tasks, 
-    get_all_employees,
+    supabase,
+    get_all_projects,
+    get_coordinator_level_tasks,
+    get_all_hods,
     create_profile,
     create_client_record,
     create_project,
@@ -14,16 +14,29 @@ from utils.db import (
     create_task,
     get_all_clients,
     update_project,
-    get_total_time_logged
+    get_total_time_logged_bulk,
+    get_proposals_bulk,
+    get_hods_with_departments,
+    sync_task_deadline,
+    sync_profile_role
 )
 import uuid
 
 def render(user):
-    st.header("Manager Dashboard")
+    st.header("🎯 Coordinator Portal")
     
-    tabs = st.tabs(["Client Onboarding", "Task Dispatcher", "Projects Overview", "Add Employee"])
+    active_tab = st.radio("Coordinator Navigation", [
+        "🤝 Client Onboarding", 
+        "📬 Task Dispatcher", 
+        "📈 Projects Overview", 
+        "👥 Team Management",
+        "📝 Weekly Report",
+        "🤖 AI Assistant"
+    ], horizontal=True, label_visibility="collapsed")
     
-    with tabs[0]:
+    st.divider()
+    
+    if active_tab == "🤝 Client Onboarding":
         st.subheader("Client Management")
         
         onboarding_tabs = st.tabs(["Onboard New Client", "Add Project for Existing Client"])
@@ -54,6 +67,8 @@ def render(user):
                             
                             # 2. Create Client
                             client = create_client_record(profile["id"], company_name)
+                            # The role tables are the source of truth for the label.
+                            sync_profile_role(profile["id"])
                             
                             # 3. Create Project
                             project = create_project(client["id"], project_title)
@@ -118,7 +133,7 @@ def render(user):
             else:
                 st.info("No clients exist yet. Please onboard a client first.")
                         
-    with tabs[1]:
+    elif active_tab == "📬 Task Dispatcher":
         st.subheader("Global Task Dispatcher")
         
         st.write("### Create Internal Task")
@@ -174,22 +189,25 @@ def render(user):
             
         st.write("---")
         st.write("### Assign Existing Tasks")
-        
-        tasks = get_all_tasks()
-        employees = get_all_employees()
-        
+        st.caption("Unassigned work and tasks sitting with an HOD. Work an HOD has passed down to their team is tracked by that HOD.")
+
+        tasks = get_coordinator_level_tasks()
+        hods = get_all_hods()
+
         if not tasks:
-            st.info("No tasks found.")
+            st.info("No tasks at your level right now.")
         else:
-            # Map employees for selectbox
-            emp_options = {"Unassigned": None}
-            for e in employees:
-                emp_name = e["profiles"]["full_name"]
-                emp_options[f"{emp_name} ({e['designation']})"] = e["id"]
-                
+            # Map HODs for selectbox
+            hod_options = {"Unassigned": None}
+            for h in hods:
+                hod_name = h["profiles"]["full_name"]
+                hod_options[f"HOD: {hod_name}"] = h["profile_id"]
+
+            tracked_by_task = get_total_time_logged_bulk([t["id"] for t in tasks])
+
             for task in tasks:
                 with st.expander(f"{task['title']} - {task['projects']['title']} ({task['status']})"):
-                    total_tracked = get_total_time_logged(task['id'])
+                    total_tracked = tracked_by_task.get(task['id'], 0.0)
                     st.write(f"**Description:** {task['description']}")
                     st.write(f"**Source:** {task['task_source']}")
                     st.write(f"**Tracked Time:** {total_tracked:.2f} hrs (Manually Logged: {task.get('actual_hours', 0)} hrs)")
@@ -197,26 +215,35 @@ def render(user):
                         st.markdown(f"**Your Attachment:** [View/Download File]({task['image_url']})")
                     if task.get('employee_image_url'):
                         st.markdown(f"**Employee Attachment:** [View/Download File]({task['employee_image_url']})")
-                    
                     with st.form(f"dispatch_form_{task['id']}"):
                         col1, col2 = st.columns(2)
                         
-                        # Find current assignee
+                        # Find current assignee in HODs
                         current_assignee_name = "Unassigned"
                         if task["assigned_to"]:
-                            for name, e_id in emp_options.items():
-                                if e_id == task["assigned_to"]:
+                            for name, p_id in hod_options.items():
+                                if p_id == task["assigned_to"]:
                                     current_assignee_name = name
                                     break
                                     
                         with col1:
                             assignee_name = st.selectbox(
-                                "Assign To", 
-                                options=list(emp_options.keys()), 
-                                index=list(emp_options.keys()).index(current_assignee_name),
+                                "Assign To HOD", 
+                                options=list(hod_options.keys()), 
+                                index=list(hod_options.keys()).index(current_assignee_name),
                                 key=f"assign_{task['id']}"
                             )
-                            is_visible = st.checkbox("Visible to Client Portal", value=task.get("is_visible_to_client", True), key=f"visible_{task['id']}")
+                            # Only client requests can ever reach the client portal,
+                            # so the toggle would be a no-op on an internal task.
+                            if task.get("task_source") == "client_request":
+                                is_visible = st.checkbox(
+                                    "Visible to Client Portal",
+                                    value=task.get("is_visible_to_client", True),
+                                    key=f"visible_{task['id']}"
+                                )
+                            else:
+                                is_visible = task.get("is_visible_to_client", True)
+                                st.caption("Internal task — never shown in the client portal.")
                         with col2:
                             est_hours = st.number_input(
                                 "Estimated Hours", 
@@ -229,23 +256,39 @@ def render(user):
                         submitted = st.form_submit_button("Update Task & Save Changes")
                         
                         if submitted:
+                            new_assignee_id = hod_options[assignee_name]
                             updates = {
-                                "assigned_to": emp_options[assignee_name],
+                                "assigned_to": new_assignee_id,
                                 "estimated_hours": est_hours,
                                 "is_visible_to_client": is_visible
                             }
                             update_task(task["id"], updates)
+
+                            # Assignment happens here, not at creation, so this is
+                            # where a client-requested task's deadline first gets
+                            # an owner worth putting on the calendar.
+                            if new_assignee_id and new_assignee_id != task.get("assigned_to"):
+                                sync_task_deadline(task["id"])
+
                             st.success("Task updated.")
                             st.rerun()
 
-    with tabs[2]:
+    elif active_tab == "📈 Projects Overview":
         st.subheader("Projects Overview")
         projects = get_all_projects()
         
         if projects:
             df = pd.DataFrame(projects)
             df["company_name"] = df["clients"].apply(lambda x: x["company_name"])
-            st.dataframe(df[["title", "company_name", "status", "created_at"]], hide_index=True)
+
+            # Surface the client's accept/reject decision -- otherwise it is
+            # invisible work: the client acts and nobody on staff ever sees it.
+            proposals_by_project = get_proposals_bulk([p["id"] for p in projects])
+            df["latest_proposal"] = df["id"].apply(
+                lambda pid: proposals_by_project[pid][0]["status"] if proposals_by_project.get(pid) else "none"
+            )
+
+            st.dataframe(df[["title", "company_name", "status", "latest_proposal", "created_at"]], hide_index=True)
             
             st.write("---")
             st.write("### Update Project Status")
@@ -278,32 +321,38 @@ def render(user):
         else:
             st.info("No projects yet.")
 
-    with tabs[3]:
-        st.subheader("Add New Employee")
-        st.write("Create a new employee profile to assign them tasks.")
-        
-        with st.form("add_employee_form"):
-            col1, col2 = st.columns(2)
-            with col1:
-                emp_name = st.text_input("Full Name")
-            with col2:
-                emp_dept = st.text_input("Department")
-                emp_desig = st.text_input("Designation")
-                
-            submitted_emp = st.form_submit_button("Add Employee")
+    elif active_tab == "👥 Team Management":
+        st.subheader("👥 Team Management")
+        st.write("View HODs and their departments.")
+        hods = get_hods_with_departments()
+        if hods:
+            for hod in hods:
+                st.markdown(f"- **{hod['profiles']['full_name']}** (HOD of {hod['departments']['name']})")
+        else:
+            st.info("No HODs assigned yet.")
             
-            if submitted_emp:
-                if not (emp_name and emp_dept and emp_desig):
-                    st.error("Please fill in all fields.")
+    elif active_tab == "📝 Weekly Report":
+        st.subheader("📝 Weekly Report")
+        with st.form("weekly_report_form"):
+            goals = st.text_area("Goals Hit This Week")
+            blockers = st.text_area("Blockers & Issues")
+            notes = st.text_area("Additional Notes")
+            
+            if st.form_submit_button("Submit Report to Admin"):
+                coord_rec = supabase.table("coordinators").select("id").eq("profile_id", user['id']).execute().data
+                if coord_rec:
+                    res = supabase.table("weekly_reports").insert({
+                        "coordinator_id": coord_rec[0]['id'],
+                        "goals_hit": goals,
+                        "blockers": blockers,
+                        "notes": notes
+                    }).execute()
+                    if res.data:
+                        st.success("Weekly Report submitted successfully!")
                 else:
-                    try:
-                        # 1. Create Profile
-                        emp_profile = create_profile(emp_name, "employee")
-                        
-                        # 2. Create Employee record
-                        create_employee_record(emp_profile["id"], emp_dept, emp_desig)
-                        
-                        st.success(f"Successfully added {emp_name}! Their access code is: {emp_profile['login_code']}")
-                    except Exception as e:
-                        st.error(f"Error adding employee: {str(e)}")
+                    st.error("You are not registered in the coordinators table.")
+                    
+    elif active_tab == "🤖 AI Assistant":
+        st.subheader("🤖 AI Data Analyst")
+        st.info("AI Chat coming soon to Coordinator Portal.")
 
