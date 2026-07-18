@@ -1,6 +1,13 @@
 import streamlit as st
 import re
-from utils.db import get_profile_by_code, get_user_roles
+from utils.db import (
+    authenticate,
+    end_session,
+    get_profile_by_session_token,
+    get_user_roles,
+    start_session,
+)
+from utils.theme import inject_theme
 from streamlit_cookies_controller import CookieController
 import views.coordinator_portal as coordinator_portal
 import views.employee_dashboard as employee_dashboard
@@ -11,112 +18,127 @@ import views.hod_portal as hod_portal
 controller = CookieController()
 def handle_login():
     access_code = st.session_state.get("access_code_input")
-    if access_code:
-        if not re.match(r"^cs-\d{6}-\d{3}$", access_code):
-            st.session_state["login_error"] = "Invalid Format. Must be cs-XXXXXX-YYY"
-            return
-            
-        profile = get_profile_by_code(access_code)
-        if profile:
-            st.session_state["user"] = profile
-            st.session_state["just_logged_in"] = access_code
-        else:
-            st.session_state["login_error"] = "Invalid Access Code. Please try again."
-    else:
-        st.session_state["login_error"] = "Please enter an Access Code."
+    password = st.session_state.get("password_input")
+
+    if not access_code or not password:
+        st.session_state["login_error"] = "Enter both your access code and password."
+        return
+
+    if not re.match(r"^cs-\d{6}-\d{3}$", access_code):
+        st.session_state["login_error"] = "Invalid Format. Must be cs-XXXXXX-YYY"
+        return
+
+    profile = authenticate(access_code, password)
+    if not profile:
+        # One message for both failures on purpose: saying which half was wrong
+        # tells someone walking the thousand-value code space when they have
+        # found a real account.
+        st.session_state["login_error"] = "Invalid access code or password."
+        return
+
+    st.session_state["user"] = profile
+    # The cookie carries this token, never the credentials.
+    st.session_state["just_logged_in"] = start_session(profile["id"])
 
 def handle_logout():
     if "user" in st.session_state:
+        end_session(st.session_state["user"].get("id"))
         del st.session_state["user"]
     st.session_state["just_logged_out"] = True
 
 st.set_page_config(page_title="ClixoSoft CRM", page_icon="🏢", layout="wide")
+inject_theme()
 
 
 def login():
+    # Only what is specific to the login screen: the shared stylesheet already
+    # dresses the form, its inputs and the submit button.
     st.markdown("""
     <style>
-        /* Center the login container */
-        .block-container {
-            max-width: 100%;
-            padding-top: 5rem;
-        }
-        
-        /* The Card */
+        /* No sidebar on the login page.
+           Logging out reruns the script and renders nothing into the sidebar,
+           but Streamlit keeps the container mounted for the life of the browser
+           session -- the rerun empties its contents without unmounting the
+           shell, so an empty panel sat next to the login form until a full
+           refresh rebuilt the page. Hiding it here fixes the logout path and
+           the first-visit path with one rule, since neither should ever show
+           one. */
+        [data-testid="stSidebar"],
+        [data-testid="stSidebarCollapseButton"],
+        [data-testid="stSidebarCollapsed"] { display: none !important; }
+
+        .block-container { padding-top: 6rem; }
         [data-testid="stForm"] {
-            background-color: #1a1c23;
-            border: none;
-            border-radius: 30px;
-            padding: 40px;
             margin: 0 auto;
-            max-width: 450px;
-            box-shadow: 0 20px 40px -10px rgba(0,0,0,0.5), 0 0 40px rgba(14, 165, 233, 0.15);
+            max-width: 430px;
+            padding: 2.5rem;
+            box-shadow: 0 24px 48px -12px rgba(0, 0, 0, 0.6),
+                        0 0 60px -20px rgba(14, 165, 233, 0.25);
         }
-        
-        /* Input Field Styling */
-        [data-testid="stTextInput"] input {
-            border-radius: 9999px;
-            background-color: #262932;
-            border: 1px solid #333842;
-            color: white;
-            padding: 15px 20px;
-            font-size: 1rem;
-            box-shadow: inset 0 2px 4px rgba(0,0,0,0.1);
+        .login-brand {
+            text-align: center;
+            font-size: 0.7rem; font-weight: 700; letter-spacing: 0.22em;
+            color: #64748b; text-transform: uppercase;
+            margin-bottom: 0.5rem;
         }
-        [data-testid="stTextInput"] input:focus {
-            border-color: #0ea5e9;
-            box-shadow: 0 0 10px rgba(14, 165, 233, 0.3), inset 0 2px 4px rgba(0,0,0,0.1);
+        .login-title {
+            text-align: center; font-size: 2.2rem; font-weight: 800;
+            color: #e6edf6; margin: 0;
         }
-        
-        /* Button Styling */
-        [data-testid="stFormSubmitButton"] button {
-            border-radius: 9999px;
-            background: linear-gradient(135deg, #0284c7 0%, #0ea5e9 100%);
-            border: none;
-            color: white !important;
-            font-weight: 700;
-            font-size: 1.1rem;
-            padding: 10px 0;
-            box-shadow: 0 10px 20px -5px rgba(14, 165, 233, 0.5);
-            transition: transform 0.2s, box-shadow 0.2s;
-        }
-        [data-testid="stFormSubmitButton"] button:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 15px 25px -5px rgba(14, 165, 233, 0.6);
-        }
-        [data-testid="stFormSubmitButton"] button p {
-            color: white !important;
+        .login-sub {
+            text-align: center; color: #94a3b8;
+            font-size: 0.9rem; margin-bottom: 1.75rem;
         }
     </style>
     """, unsafe_allow_html=True)
-    
+
     with st.form("login_form", clear_on_submit=False):
-        st.markdown("<h1 style='text-align: center; color: #0ea5e9; font-size: 2.8rem; font-weight: 800; margin-bottom: 0;'>Sign In</h1>", unsafe_allow_html=True)
-        st.markdown("<p style='text-align: center; color: #94a3b8; margin-bottom: 2rem;'>Enter your Access Code</p>", unsafe_allow_html=True)
-        
-        st.text_input("Access Code", type="password", key="access_code_input", label_visibility="collapsed", placeholder="Access Code")
-        
+        st.markdown("<div class='login-brand'>ClixoSoft CRM</div>", unsafe_allow_html=True)
+        st.markdown("<h1 class='login-title'>Sign In</h1>", unsafe_allow_html=True)
+        st.markdown("<p class='login-sub'>Enter your access code and password</p>", unsafe_allow_html=True)
+
+        # The code is a username, not a secret -- showing it lets people check
+        # what they typed. The password is what is actually being protected.
+        st.text_input("Access Code", key="access_code_input", label_visibility="collapsed", placeholder="Access Code (cs-XXXXXX-YYY)")
+        st.text_input("Password", type="password", key="password_input", label_visibility="collapsed", placeholder="Password")
+
         # Spacing
         st.write("")
         st.write("")
         
-        st.form_submit_button("Sign In", use_container_width=True, on_click=handle_login)
+        st.form_submit_button("Sign In", width="stretch", on_click=handle_login)
         
         if "login_error" in st.session_state:
             st.error(st.session_state["login_error"])
             del st.session_state["login_error"]
 
+def forget_login_cookie():
+    """Drop the saved login cookie, tolerating one the controller never saw.
+
+    CookieController.remove() tells the browser to delete the cookie and THEN
+    pops it from its own dict, unguarded. That dict only knows about cookies the
+    controller itself set this session -- but an auto-login reads the code
+    straight from st.context.cookies, so on that path the name was never
+    registered and logging out raised KeyError. The browser-side removal has
+    already been dispatched by the time it throws, so swallowing this is safe.
+    """
+    try:
+        controller.remove("login_code")
+    except KeyError:
+        pass
+
+
 def main():
     if "user" not in st.session_state and not st.session_state.get("just_logged_out"):
-        saved_code = st.context.cookies.get("login_code")
-        if saved_code:
-            profile = get_profile_by_code(saved_code)
+        saved_token = st.context.cookies.get("login_code")
+        if saved_token:
+            profile = get_profile_by_session_token(saved_token)
             if profile:
                 st.session_state["user"] = profile
 
     if "user" not in st.session_state:
         if st.session_state.get("just_logged_out"):
-            controller.remove("login_code")
+            forget_login_cookie()
             del st.session_state["just_logged_out"]
         login()
     else:
@@ -142,68 +164,12 @@ def main():
             
         role_display = str(active_role).capitalize() if active_role else "Unknown"
         
-        # Inject custom CSS for a beautiful sidebar
-        st.markdown("""
-        <style>
-            /* Make the sidebar background distinct and match dark mode */
-            [data-testid="stSidebar"] {
-                background-color: #1f1f1f;
-                border-right: 1px solid #333333;
-            }
-            
-            /* Profile Card Container */
-            .sidebar-profile {
-                text-align: center;
-                padding-bottom: 1.5rem;
-                margin-bottom: 1.5rem;
-                border-bottom: 1px solid #333333;
-            }
-            
-            /* Circular Avatar */
-            .sidebar-profile img {
-                width: 90px;
-                height: 90px;
-                border-radius: 50%;
-                margin-bottom: 1rem;
-                border: 3px solid #333333;
-                box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -1px rgba(0, 0, 0, 0.18);
-            }
-            
-            /* User Name */
-            .sidebar-name {
-                font-family: 'Inter', sans-serif;
-                font-size: 1.25rem;
-                font-weight: 700;
-                color: #ffffff;
-                margin-bottom: 0.25rem;
-            }
-            
-            /* User Role Badge */
-            .sidebar-role {
-                font-family: 'Inter', sans-serif;
-                font-size: 0.75rem;
-                font-weight: 700;
-                color: #60a5fa;
-                background-color: rgba(59, 130, 246, 0.15);
-                border: 1px solid rgba(59, 130, 246, 0.3);
-                padding: 0.25rem 0.75rem;
-                border-radius: 9999px;
-                display: inline-block;
-                text-transform: uppercase;
-                letter-spacing: 0.05em;
-                box-shadow: 0 0 10px rgba(59, 130, 246, 0.1);
-            }
-            
-            /* Adjust the main content to breathe a bit more */
-            .block-container {
-                padding-top: 2rem;
-            }
-        </style>
-        """, unsafe_allow_html=True)
-        
+        # The sidebar profile card is styled in utils/theme.py alongside every
+        # other surface, so the whole app moves together when a colour changes.
+
         # Build the avatar URL (fallback to initials via ui-avatars.com)
         safe_name = user.get('full_name', 'User').replace(' ', '+')
-        avatar_url = f"https://ui-avatars.com/api/?name={safe_name}&background=eff6ff&color=3b82f6&size=200&bold=true"
+        avatar_url = f"https://ui-avatars.com/api/?name={safe_name}&background=0ea5e9&color=0f1117&size=200&bold=true"
         
         # Render the profile card
         st.sidebar.markdown(f"""
@@ -219,7 +185,7 @@ def main():
         st.sidebar.write("")
         
         # A full-width, clean logout button
-        st.sidebar.button("Logout", use_container_width=True, type="primary", on_click=handle_logout)
+        st.sidebar.button("Logout", width="stretch", type="primary", on_click=handle_logout)
             
         if active_role == "client":
             client_portal.render(user)

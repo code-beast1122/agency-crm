@@ -11,9 +11,11 @@ from utils.db import (
     get_employee_by_profile_id,
     get_tasks_assigned_to
 )
+from utils.theme import page_header
+
 def render(user):
-    st.header("Employee Dashboard")
-    
+    page_header("My Workspace", f"Signed in as {user.get('full_name', 'employee')}")
+
     # We fetch tasks directly assigned to this user's profile ID
     profile_id = user["id"]
     
@@ -29,8 +31,8 @@ def render(user):
         return
         
     active_tab = st.radio("Employee Navigation", [
-        "🌞 Active Tasks", 
-        "✅ Completed Tasks"
+        "Active Tasks", 
+        "Completed Tasks"
     ], horizontal=True, label_visibility="collapsed")
     
     st.divider()
@@ -42,14 +44,14 @@ def render(user):
     tracked_by_task = get_total_time_logged_bulk(task_ids)
     timers_by_task = get_active_timers_bulk(task_ids, employee_id)
 
-    if active_tab == "🌞 Active Tasks":
+    if active_tab == "Active Tasks":
         if not active_tasks:
             st.info("No active tasks assigned to you.")
         else:
             for task in active_tasks:
                 render_task(task, employee_id, tracked_by_task.get(task['id'], 0.0), timers_by_task.get(task['id']))
 
-    elif active_tab == "✅ Completed Tasks":
+    elif active_tab == "Completed Tasks":
         if not completed_tasks:
             st.info("No completed tasks.")
         else:

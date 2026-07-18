@@ -160,6 +160,49 @@ def provision_user_calendar(full_name: str, email: str):
         return {"status": "error", "message": f"Google Calendar API Error: {str(e)}"}
 
 
+def create_meeting_event(title: str, start_iso: str, duration_minutes: int = 30,
+                         calendar_id: str = None, agenda: str = None, join_url: str = None):
+    """Put a meeting on the organiser's own CRM calendar.
+
+    Timed, unlike create_calendar_event's all-day deadlines. Only the organiser
+    gets this: the client has no calendar (no email on file), and the service
+    account cannot invite attendees anyway -- they join from their portal.
+    """
+    if not calendar_id:
+        return {"status": "error", "message": "No calendar for this organiser."}
+
+    service, err = _calendar_service()
+    if err:
+        return err
+
+    try:
+        from datetime import datetime, timedelta
+
+        start = datetime.fromisoformat(str(start_iso).replace("Z", "+00:00"))
+        # Google rejects a dateTime with no offset unless a timeZone is given;
+        # the form collects wall-clock time, so read it as this machine's zone.
+        if start.tzinfo is None:
+            start = start.astimezone()
+        end = start + timedelta(minutes=duration_minutes or 30)
+
+        details = [d for d in (agenda, f"Join: {join_url}" if join_url else None) if d]
+
+        event = {
+            'summary': f"Meeting: {title}",
+            'description': "\n\n".join(details) or None,
+            'start': {'dateTime': start.isoformat()},
+            'end': {'dateTime': end.isoformat()},
+            'reminders': {
+                'useDefault': False,
+                'overrides': [{'method': 'popup', 'minutes': 15}],
+            },
+        }
+        created = service.events().insert(calendarId=calendar_id, body=event).execute()
+        return {"status": "success", "message": f"Added to your calendar: {created.get('htmlLink')}"}
+    except Exception as e:
+        return {"status": "error", "message": f"Google Calendar API Error: {str(e)}"}
+
+
 def create_calendar_event(task_title: str, deadline_date: str, assignee_email: str = None,
                           assignee_name: str = None, calendar_id: str = None):
     """

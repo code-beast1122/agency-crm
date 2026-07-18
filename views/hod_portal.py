@@ -11,35 +11,44 @@ from utils.db import (
     get_hod_department,
     get_tasks_assigned_to,
     get_department_employees,
+    get_meetings_for_hod,
+    normalize_join_url,
     provision_calendar,
     sync_profile_role
 )
+from views.credentials import show_credentials
+from views.meetings import MEETING_STATUS_COLORS, is_upcoming, meeting_time
+from utils.theme import badge, empty_state, entity_card, page_header, section
 import uuid
 
 def render(user):
-    st.header("👔 Head of Department Portal")
-
-    # Get HOD's department
+    # Looked up before the masthead so the department can name it: "HOD Portal"
+    # alone doesn't tell someone which desk they are sitting at.
     hod_rec = get_hod_department(user['id'])
     if not hod_rec:
+        page_header("Head of Department")
         st.error("You are not assigned to a department.")
         return
 
     dept_id = hod_rec['department_id']
     dept_name = hod_rec['departments']['name']
-    
-    st.subheader(f"Department: {dept_name}")
-    
+
+    page_header("Head of Department", f"{dept_name} department")
+
     active_tab = st.radio("HOD Navigation", [
-        "📥 My Tasks (From Coordinator)",
-        "📬 Dispatch to Team",
-        "📊 Team Tasks",
-        "👥 My Team"
+        "My Tasks (From Coordinator)",
+        "Dispatch to Team",
+        "Team Tasks",
+        "My Team",
+        "Meetings"
     ], horizontal=True, label_visibility="collapsed")
-    
+
     st.divider()
-    
-    if active_tab == "📥 My Tasks (From Coordinator)":
+
+    if active_tab == "Meetings":
+        render_hod_meetings(user)
+
+    elif active_tab == "My Tasks (From Coordinator)":
         st.markdown("### Tasks Assigned to Me (From Coordinator)")
         
         # Fetch tasks assigned to the HOD's profile ID
@@ -106,8 +115,8 @@ def render(user):
                                 st.success("Task updated successfully!")
                                 st.rerun()
         
-    elif active_tab == "📬 Dispatch to Team":
-        st.markdown("### 📬 Dispatch Tasks to Employees")
+    elif active_tab == "Dispatch to Team":
+        st.markdown("### Dispatch Tasks to Employees")
         emps = get_department_employees(dept_id)
         projects = get_all_projects()
         
@@ -172,7 +181,7 @@ def render(user):
         else:
             st.info("You need both Employees in your department and active Projects to dispatch tasks.")
         
-    elif active_tab == "📊 Team Tasks":
+    elif active_tab == "Team Tasks":
         st.markdown("### Work I Dispatched to My Team")
         st.caption("Everything assigned to employees in this department, and what they have submitted back.")
 
@@ -214,7 +223,7 @@ def render(user):
                     if not task.get("employee_image_url") and not task.get("submission_notes"):
                         st.caption("Nothing submitted yet.")
 
-    elif active_tab == "👥 My Team":
+    elif active_tab == "My Team":
         st.markdown("### Add New Employee")
         with st.form("add_dept_employee_form"):
             col1, col2 = st.columns(2)
@@ -235,21 +244,89 @@ def render(user):
                         create_employee_record(emp_profile["id"], dept_id, emp_desig, emp_email)
                         # The role tables are the source of truth for the label.
                         sync_profile_role(emp_profile["id"])
-                        st.success(f"Added {emp_name} to {dept_name}! Access Code: {emp_profile['login_code']}")
+                        st.success(f"Added {emp_name} to {dept_name}!")
+                        show_credentials(emp_profile)
 
                         cal = provision_calendar(emp_profile["id"], emp_name, emp_email, "employees")
                         if cal.get("status") == "success":
-                            st.success(f"📅 {cal['message']} They must accept it to get reminders.")
+                            st.success(f"{cal['message']} They must accept it to get reminders.")
                         else:
                             st.warning(f"Employee added, but the calendar invite failed: {cal.get('message')}")
                     except Exception as e:
                         st.error(f"Error adding employee: {str(e)}")
                         
         st.write("---")
-        st.markdown("### Current Team Members")
         emps = get_department_employees(dept_id)
+        section("Current Team Members", f"{len(emps)} in {dept_name}" if emps else None)
         if emps:
             for emp in emps:
-                st.markdown(f"- **{emp['profiles']['full_name']}** ({emp['designation']})")
+                entity_card(emp["profiles"]["full_name"], meta=emp["designation"])
         else:
-            st.info("No employees in this department yet.")
+            empty_state(
+                "No employees in this department yet",
+                "Add your first team member above."
+            )
+
+
+def render_hod_meetings(user):
+    """Meetings a coordinator or admin has tagged this HOD to attend.
+
+    Read-only by design: scheduling, editing, and the AI summary tools live in
+    views/meetings.py for the admin/coordinator who own the meeting. An HOD is
+    an attendee, not an organiser, so this only ever shows what is already
+    there -- there is nothing here for them to break.
+    """
+    meetings = get_meetings_for_hod(user["id"])
+
+    if not meetings:
+        empty_state(
+            "No meetings yet",
+            "When a coordinator or admin tags you on a meeting, it appears here."
+        )
+        return
+
+    upcoming = [m for m in meetings if is_upcoming(m)]
+    past = [m for m in meetings if not is_upcoming(m)]
+
+    if upcoming:
+        section("Upcoming", f"{len(upcoming)} scheduled")
+        for meeting in upcoming:
+            render_hod_meeting_card(meeting)
+
+    if past:
+        section("Past Meetings", f"{len(past)} held")
+        for meeting in past:
+            render_hod_meeting_card(meeting)
+
+
+def render_hod_meeting_card(meeting):
+    project = meeting.get("projects") or {}
+    client_name = (project.get("clients") or {}).get("company_name")
+
+    with st.container(border=True):
+        col_a, col_b = st.columns([3, 1])
+        with col_a:
+            st.markdown(f"**{meeting['title']}**")
+            sub = project.get("title", "Unknown project")
+            if client_name:
+                sub += f" — {client_name}"
+            st.caption(sub)
+            when = meeting_time(meeting)
+            if when:
+                st.caption(when.strftime("%d %b %Y at %H:%M") + f" · {meeting.get('duration_minutes', 30)} min")
+        with col_b:
+            badge(meeting["status"], MEETING_STATUS_COLORS)
+
+        if meeting.get("agenda"):
+            st.write(meeting["agenda"])
+
+        # An HOD is internal staff, not a client -- unlike the client portal,
+        # there is no visibility toggle to check here. If they were tagged,
+        # they see everything about the meeting, including the summary.
+        join_url = normalize_join_url(meeting.get("join_url"))
+        if join_url:
+            st.link_button("Join Meeting", join_url, type="primary")
+
+        if meeting.get("summary"):
+            with st.expander("Meeting Summary"):
+                st.markdown(meeting["summary"])

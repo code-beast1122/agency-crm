@@ -1,9 +1,13 @@
 import os
+import re
 import streamlit as st
 from supabase import create_client, Client
 from dotenv import load_dotenv
 from datetime import datetime, timezone
+import threading
 from concurrent.futures import ThreadPoolExecutor
+
+from utils.auth import generate_password, generate_session_token, passwords_match
 
 load_dotenv()
 
@@ -18,6 +22,48 @@ if not SUPABASE_URL or not SUPABASE_KEY:
     raise ValueError("Missing Supabase credentials. Make sure SUPABASE_URL and SERVICE_ROLE_KEY are set in .env or Streamlit secrets")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+# ---------------------------------------------------------------
+# CONCURRENT READS
+#
+# A Supabase client is NOT safe to share across threads. postgrest hardcodes
+# http2=True, so one client means one HTTP/2 connection, and httpcore encodes
+# request headers (mutating the shared HPACK dynamic table) outside its write
+# lock. Two threads encoding at once corrupt that table and the server kills the
+# connection: RemoteProtocolError ConnectionTerminated, error_code 9
+# (COMPRESSION_ERROR) or 1 (PROTOCOL_ERROR). It is a race, so it fires
+# intermittently and takes the whole connection down with it, not just one query.
+#
+# Fix: fan-out reads get a client of their own per thread -- a separate
+# connection, and therefore separate HPACK state. Sharing is the bug; the
+# threads are not.
+#
+# Serialising instead was measured and rejected: the fan-out is latency-bound at
+# ~230ms per round-trip, so five serial reads cost ~1.14s against ~0.25s
+# concurrent, on every rerun.
+#
+# The pool is module-level ON PURPOSE. Its threads are reused, so each thread
+# builds its client (and pays its TLS handshake) once rather than per call.
+# ---------------------------------------------------------------
+
+_thread_local = threading.local()
+
+# Sized to the widest fan-out below (get_role_counts, 6 tables).
+_READ_POOL = ThreadPoolExecutor(max_workers=6, thread_name_prefix="crm-read")
+
+
+def _thread_client() -> Client:
+    """The calling thread's own Supabase client, created on first use.
+
+    Only for reads running inside _READ_POOL. Writes stay on the module-level
+    `supabase` client on the main thread, where there is nothing to race with.
+    """
+    client = getattr(_thread_local, "client", None)
+    if client is None:
+        client = create_client(SUPABASE_URL, SUPABASE_KEY)
+        _thread_local.client = client
+    return client
+
 
 # ---------------------------------------------------------------
 # CACHING
@@ -45,32 +91,100 @@ def _invalidate_reads():
 
 @st.cache_data(ttl=CACHE_TTL, show_spinner=False)
 def get_profile_by_code(login_code: str):
-    """Fetch user profile based on unique login code.
+    """Fetch a profile by login code. Identifies only -- does NOT authenticate.
 
-    Cached: app.py calls this on every rerun to restore the session from cookie.
+    The login code is a username: it comes from a thousand-value space, so
+    anyone with one can guess the rest. Never log a user in on the strength of
+    this alone; go through authenticate().
     """
     response = supabase.table("profiles").select("*").eq("login_code", login_code).execute()
     if response.data:
         return response.data[0]
     return None
 
+
+def authenticate(login_code: str, password: str):
+    """Return the profile only when the code AND password both match.
+
+    Uncached on purpose: a cached login check would keep answering after a
+    password was reset or an account revoked.
+    """
+    if not login_code or not password:
+        return None
+
+    response = supabase.table("profiles").select("*").eq("login_code", login_code).execute()
+    if not response.data:
+        return None
+
+    profile = response.data[0]
+    if not passwords_match(password, profile.get("password")):
+        return None
+    return profile
+
+
+def start_session(profile_id: str):
+    """Issue a fresh session token for the 'remember me' cookie.
+
+    Rotated on every login: an old cookie stops working once you log in again,
+    so a stolen one has a short life.
+    """
+    token = generate_session_token()
+    supabase.table("profiles").update({"session_token": token}).eq("id", profile_id).execute()
+    _invalidate_reads()
+    return token
+
+
+def get_profile_by_session_token(token: str):
+    """Restore a session from the cookie token, or None if it was revoked."""
+    if not token:
+        return None
+    response = supabase.table("profiles").select("*").eq("session_token", token).execute()
+    if response.data:
+        return response.data[0]
+    return None
+
+
+def end_session(profile_id: str):
+    """Revoke the session token so the old cookie is dead."""
+    if not profile_id:
+        return
+    supabase.table("profiles").update({"session_token": None}).eq("id", profile_id).execute()
+    _invalidate_reads()
+
+
+def reset_password(profile_id: str):
+    """Give someone a new password and return it to be shown once.
+
+    This is the forgot-password flow: nobody can be locked out, and it also
+    kills their session token so a device they lost stops working.
+    """
+    password = generate_password()
+    supabase.table("profiles").update(
+        {"password": password, "session_token": None}
+    ).eq("id", profile_id).execute()
+    _invalidate_reads()
+    return password
+
 @st.cache_data(ttl=CACHE_TTL, show_spinner=False)
 def get_user_roles(profile_id: str):
     """Fetch all roles a user holds by checking the role mapping tables.
 
-    One query per role table, but fired concurrently rather than in sequence --
-    this runs on every rerun, so five serial round-trips cost ~2.9s of dead time
+    One query per role table, fired concurrently rather than in sequence -- this
+    runs on every rerun, so five serial round-trips cost ~1.1s of dead time
     before any portal renders. Cached on top of that.
+
+    Each worker uses its own client: see the CONCURRENT READS note above for why
+    sharing one across threads corrupts the connection.
     """
     role_tables = ["admin", "coordinator", "hod", "employee", "client"]
 
     def holds_role(role):
         return bool(
-            supabase.table(role + "s").select("id").eq("profile_id", profile_id).execute().data
+            _thread_client().table(role + "s").select("id").eq("profile_id", profile_id)
+            .execute().data
         )
 
-    with ThreadPoolExecutor(max_workers=len(role_tables)) as pool:
-        held = list(pool.map(holds_role, role_tables))
+    held = list(_READ_POOL.map(holds_role, role_tables))
 
     return [role for role, has_it in zip(role_tables, held) if has_it]
 
@@ -193,6 +307,147 @@ def update_proposal_status(proposal_id: str, status: str):
     _invalidate_reads()
     return response.data
 
+# ---------------------------------------------------------------
+# MEETINGS
+#
+# A meeting is private until someone deliberately shares it: both
+# show_meeting_to_client and show_summary_to_client default to false in the
+# schema. Nothing here ever defaults them open.
+# ---------------------------------------------------------------
+
+MEETING_SCHEDULED = "scheduled"
+MEETING_COMPLETED = "completed"
+MEETING_CANCELLED = "cancelled"
+
+def normalize_join_url(url):
+    """Force a pasted link to be absolute, or return None.
+
+    "meet.google.com/abc" in an href is a RELATIVE path: the browser resolves it
+    against the CRM's own domain and opens a CRM tab instead of the meeting.
+    People paste links without the scheme constantly, so add it rather than
+    make them get it right.
+
+    Anything using a scheme other than http/https is dropped -- a join link has
+    no business being javascript: or data:.
+    """
+    if not url:
+        return None
+    url = str(url).strip()
+    if not url:
+        return None
+    if url.lower().startswith(("http://", "https://")):
+        return url
+    # Any other scheme is rejected outright. Matching on "://" is not enough:
+    # javascript:alert(1) has no slashes and would otherwise be handed a
+    # https:// prefix and stored as a real-looking link. Dots are excluded from
+    # the scheme so that a host:port ("meet.example.com:443/x") is not mistaken
+    # for one.
+    if re.match(r"^[a-zA-Z][a-zA-Z0-9+\-]*:", url):
+        return None
+    return "https://" + url
+
+@st.cache_data(ttl=CACHE_TTL, show_spinner=False)
+def get_meetings_bulk(project_ids):
+    """Meetings for many projects in one query, soonest-first per project.
+
+    Returns {project_id: [meetings]}, with an empty list for projects that have
+    none. The client portal renders a tab per project, so never call this in a
+    loop.
+    """
+    grouped = {project_id: [] for project_id in project_ids}
+    if not project_ids:
+        return grouped
+
+    response = supabase.table("meetings") \
+        .select("*") \
+        .in_("project_id", list(project_ids)) \
+        .order("scheduled_at", desc=True) \
+        .execute()
+
+    for meeting in response.data:
+        grouped.setdefault(meeting["project_id"], []).append(meeting)
+
+    return grouped
+
+def create_meeting(project_id: str, title: str, scheduled_at: str, agenda: str = None,
+                   duration_minutes: int = 30, join_url: str = None,
+                   created_by: str = None, show_meeting_to_client: bool = False):
+    """Schedule a meeting against a project.
+
+    scheduled_at must be an ISO timestamp. join_url is pasted by the staff
+    member: the service account cannot host a Meet, so whoever creates the call
+    in their own account stays its host.
+    """
+    payload = {
+        "project_id": project_id,
+        "title": title,
+        "scheduled_at": scheduled_at,
+        "duration_minutes": duration_minutes,
+        "show_meeting_to_client": show_meeting_to_client,
+    }
+    if agenda:
+        payload["agenda"] = agenda
+    join_url = normalize_join_url(join_url)
+    if join_url:
+        payload["join_url"] = join_url
+    if created_by:
+        payload["created_by"] = created_by
+
+    response = supabase.table("meetings").insert(payload).execute()
+    _invalidate_reads()
+    return response.data[0]
+
+def update_meeting(meeting_id: str, updates: dict):
+    """Update a meeting (notes, summary, status, or either visibility toggle)."""
+    if "join_url" in updates:
+        updates = dict(updates, join_url=normalize_join_url(updates["join_url"]))
+    response = supabase.table("meetings").update(updates).eq("id", meeting_id).execute()
+    _invalidate_reads()
+    return response.data
+
+def set_meeting_hods(meeting_id: str, hod_profile_ids: list):
+    """Replace the HODs tagged on a meeting with exactly this list.
+
+    A full replace, not a diff against what was there before: both the schedule
+    form and the edit form hand over "here is the complete list of who should
+    see this now", which is simpler to reason about and matches how every other
+    checkbox/multiselect in this app is saved.
+    """
+    supabase.table("meeting_hods").delete().eq("meeting_id", meeting_id).execute()
+    if hod_profile_ids:
+        supabase.table("meeting_hods").insert([
+            {"meeting_id": meeting_id, "hod_profile_id": pid} for pid in hod_profile_ids
+        ]).execute()
+    _invalidate_reads()
+
+@st.cache_data(ttl=CACHE_TTL, show_spinner=False)
+def get_meeting_hod_ids(meeting_id: str):
+    """Which HODs are currently tagged on a meeting, to pre-fill the edit form."""
+    response = supabase.table("meeting_hods").select("hod_profile_id").eq("meeting_id", meeting_id).execute()
+    return [row["hod_profile_id"] for row in response.data]
+
+@st.cache_data(ttl=CACHE_TTL, show_spinner=False)
+def get_meetings_for_hod(hod_profile_id: str):
+    """Meetings a specific HOD has been tagged to attend, newest first.
+
+    Two queries rather than one embedded-filter call: meeting_hods is the join
+    table, so an HOD's meetings are looked up there first, then the meetings
+    themselves are fetched with project/client resolved to names -- an HOD
+    should never have to know a project_id to read their own agenda.
+    """
+    tagged = supabase.table("meeting_hods").select("meeting_id") \
+        .eq("hod_profile_id", hod_profile_id).execute().data
+    meeting_ids = [row["meeting_id"] for row in tagged]
+    if not meeting_ids:
+        return []
+
+    response = supabase.table("meetings") \
+        .select("*, projects(title, clients(company_name))") \
+        .in_("id", meeting_ids) \
+        .order("scheduled_at", desc=True) \
+        .execute()
+    return response.data
+
 @st.cache_data(ttl=CACHE_TTL, show_spinner=False)
 def get_all_employees():
     """Fetch all employee profiles with their employee record."""
@@ -237,14 +492,22 @@ def get_all_tasks():
 
 @st.cache_data(ttl=CACHE_TTL, show_spinner=False)
 def get_role_counts():
-    """Counts for the admin KPI row, fired concurrently instead of one by one."""
+    """Counts for the admin KPI row, fired concurrently instead of one by one.
+
+    Each worker uses its own client: see the CONCURRENT READS note above for why
+    sharing one across threads corrupts the connection.
+    """
     tables = ["admins", "coordinators", "hods", "employees", "projects", "clients"]
 
     def count_rows(table):
-        return supabase.table(table).select("id", count="exact").execute().count or 0
+        # head=True: the count comes back in Content-Range, so there is no need
+        # to drag every id across the wire to discard it.
+        return (
+            _thread_client().table(table).select("id", count="exact", head=True)
+            .execute().count or 0
+        )
 
-    with ThreadPoolExecutor(max_workers=len(tables)) as pool:
-        counts = list(pool.map(count_rows, tables))
+    counts = list(_READ_POOL.map(count_rows, tables))
 
     return dict(zip(tables, counts))
 
@@ -373,10 +636,18 @@ def create_proposal(project_id: str, file_url: str):
     return response.data[0]
 
 def create_profile(full_name: str, role: str, login_code: str = None):
-    """Create a profile."""
+    """Create a profile with a freshly generated password.
+
+    Every path that makes a user -- admin, coordinator onboarding, HOD adding an
+    employee -- comes through here, so generating the password here is what
+    guarantees no account is ever created without one. Callers must show
+    response["password"] to whoever is setting the user up; it is the only time
+    it is put in front of them on purpose.
+    """
     payload = {
         "full_name": full_name,
         "role": role,
+        "password": generate_password(),
     }
     if login_code:
         payload["login_code"] = login_code

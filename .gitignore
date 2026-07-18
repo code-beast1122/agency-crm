@@ -2,5 +2,9 @@
 venv/
 __pycache__/
 *.pyc
-.streamlit/
+# Keep Streamlit's secrets out, but let the theme config ship -- it holds no
+# secrets, and without it the deployed app renders un-themed.
+.streamlit/*
+!.streamlit/config.toml
+.streamlit/secrets.toml
 credentials.json

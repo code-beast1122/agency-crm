@@ -1,14 +1,19 @@
 import streamlit as st
 import pandas as pd
+
 from utils.db import (
     get_client_by_profile_id,
     get_projects_for_client,
     get_tasks_for_projects_bulk,
     get_proposals_bulk,
+    get_meetings_bulk,
+    normalize_join_url,
     update_proposal_status,
     create_task,
     supabase
 )
+from utils.theme import badge, empty_state, page_header, section
+from views.meetings import MEETING_STATUS_COLORS, is_upcoming, meeting_time
 
 # Values of the proposal_status enum in Postgres. Writing anything outside this
 # set raises 22P02, so never inline these as bare strings.
@@ -43,20 +48,6 @@ PROPOSAL_STATUS_COLORS = {
 }
 
 
-def badge(label, colors):
-    """Render a status pill. Mirrors the role badge styling in app.py."""
-    fg, bg = colors.get(str(label).lower(), ("#94a3b8", "rgba(148, 163, 184, 0.15)"))
-    text = str(label).replace("_", " ").upper()
-    st.markdown(
-        f"""<span style="
-            font-size: 0.7rem; font-weight: 700; color: {fg};
-            background-color: {bg}; border: 1px solid {fg}55;
-            padding: 0.2rem 0.7rem; border-radius: 9999px;
-            display: inline-block; letter-spacing: 0.05em;
-        ">{text}</span>""",
-        unsafe_allow_html=True
-    )
-
 
 def visible_proposals(proposals):
     """A draft is staff work-in-progress -- the client only sees it once sent."""
@@ -75,11 +66,22 @@ def visible_tasks(all_tasks):
     ]
 
 
+def visible_meetings(meetings):
+    """Meetings staff have explicitly shared.
+
+    Unlike visible_tasks, this flag is the ONLY gate -- there is no task_source
+    equivalent narrowing the set first, so this one condition is the whole
+    difference between an internal meeting and a client-facing one. It is
+    deliberately fail-CLOSED: anything but a true value stays hidden.
+    """
+    return [m for m in meetings if m.get("show_meeting_to_client") is True]
+
+
 def render(user):
     client = get_client_by_profile_id(user["id"])
     company = client["company_name"] if client else user.get("full_name", "there")
 
-    st.header(f"👋 Welcome, {company}")
+    page_header(f"Welcome, {company}", "Your projects, requests and meetings")
 
     projects = get_projects_for_client(user["id"])
 
@@ -95,18 +97,23 @@ def render(user):
     tasks_by_project = {pid: visible_tasks(tasks) for pid, tasks in raw_tasks.items()}
     raw_proposals = get_proposals_bulk(project_ids)
     proposals_by_project = {pid: visible_proposals(props) for pid, props in raw_proposals.items()}
+    raw_meetings = get_meetings_bulk(project_ids)
+    meetings_by_project = {pid: visible_meetings(ms) for pid, ms in raw_meetings.items()}
 
     all_tasks = [t for tasks in tasks_by_project.values() for t in tasks]
     all_proposals = [pr for props in proposals_by_project.values() for pr in props]
+    all_meetings = [m for ms in meetings_by_project.values() for m in ms]
 
     done_tasks = [t for t in all_tasks if t.get("status") == "done"]
     pending_proposals = [pr for pr in all_proposals if pr.get("status") not in PROPOSAL_DECIDED]
+    upcoming = [m for m in all_meetings if is_upcoming(m)]
 
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4, col5 = st.columns(5)
     col1.metric("Projects", len(projects))
     col2.metric("Active Requests", len(all_tasks) - len(done_tasks))
     col3.metric("Completed", len(done_tasks))
     col4.metric("Awaiting Your Review", len(pending_proposals))
+    col5.metric("Upcoming Meetings", len(upcoming))
 
     if pending_proposals:
         st.info(f"You have {len(pending_proposals)} proposal(s) awaiting your decision. See the Overview tab of each project.")
@@ -121,18 +128,26 @@ def render(user):
             render_project(
                 project,
                 tasks_by_project[project["id"]],
-                proposals_by_project.get(project["id"], [])
+                proposals_by_project.get(project["id"], []),
+                meetings_by_project.get(project["id"], [])
             )
 
 
-def render_project(project, tasks, proposals):
+def render_project(project, tasks, proposals, meetings):
     col_title, col_status = st.columns([3, 1])
     with col_title:
         st.subheader(project["title"])
     with col_status:
         badge(project["status"], PROJECT_STATUS_COLORS)
 
-    inner_tabs = st.tabs(["Overview", "Tasks"])
+    # Progress belongs at the top of the project, not buried in the Tasks tab:
+    # "how far along are we" is the question a client opens this page to ask.
+    if tasks:
+        done = len([t for t in tasks if t.get("status") == "done"])
+        st.progress(done / len(tasks))
+        st.caption(f"{done} of {len(tasks)} requests completed ({int(done / len(tasks) * 100)}%)")
+
+    inner_tabs = st.tabs(["Overview", "Tasks", "Meetings"])
 
     with inner_tabs[0]:
         render_overview(project, tasks, proposals)
@@ -140,19 +155,78 @@ def render_project(project, tasks, proposals):
     with inner_tabs[1]:
         render_tasks(project, tasks)
 
+    with inner_tabs[2]:
+        render_meetings(project, meetings)
+
+
+def render_meetings(project, meetings):
+    """Meetings staff have shared with this client.
+
+    Everything here has already passed visible_meetings; the only extra gate is
+    show_summary_to_client, which is separate on purpose -- the client can be
+    invited to the call without seeing the notes taken about it.
+    """
+    if not meetings:
+        empty_state(
+            "No meetings scheduled yet",
+            "When your account manager schedules one, it appears here with a join link."
+        )
+        return
+
+    upcoming = [m for m in meetings if is_upcoming(m)]
+    past = [m for m in meetings if not is_upcoming(m)]
+
+    if upcoming:
+        section("Upcoming", f"{len(upcoming)} scheduled")
+        for meeting in upcoming:
+            render_meeting_card(meeting, joinable=True)
+
+    if past:
+        section("Past Meetings", f"{len(past)} held")
+        for meeting in past:
+            render_meeting_card(meeting, joinable=False)
+
+
+def render_meeting_card(meeting, joinable):
+    with st.container(border=True):
+        col_a, col_b = st.columns([3, 1])
+        with col_a:
+            st.markdown(f"**{meeting['title']}**")
+            when = meeting_time(meeting)
+            if when:
+                st.caption(when.strftime("%d %b %Y at %H:%M") + f" · {meeting.get('duration_minutes', 30)} min")
+        with col_b:
+            badge(meeting["status"], MEETING_STATUS_COLORS)
+
+        if meeting.get("agenda"):
+            st.write(meeting["agenda"])
+
+        # Normalized again at render: rows saved before the write path did this
+        # still hold scheme-less links, which resolve against the CRM's domain.
+        join_url = normalize_join_url(meeting.get("join_url"))
+        if joinable and join_url:
+            st.link_button("Join Meeting", join_url, type="primary")
+
+        if meeting.get("show_summary_to_client") and meeting.get("summary"):
+            with st.expander("Meeting Summary"):
+                st.markdown(meeting["summary"])
+
 
 def render_overview(project, tasks, proposals):
-    st.write("#### Proposals")
+    section("Proposals", "Documents shared with you for review")
 
     if not proposals:
-        st.caption("No proposals have been shared with you for this project yet.")
+        empty_state(
+            "No proposals shared yet",
+            "When your account manager sends one, you can accept or reject it here."
+        )
     else:
         for prop in proposals:
             with st.container(border=True):
                 col_a, col_b = st.columns([3, 1])
                 with col_a:
                     st.markdown(f"**Version {prop['version']}**")
-                    st.markdown(f"[📄 View / Download Proposal]({prop['file_url']})")
+                    st.markdown(f"[View / Download Proposal]({prop['file_url']})")
                 with col_b:
                     badge(prop["status"], PROPOSAL_STATUS_COLORS)
 
@@ -161,11 +235,11 @@ def render_overview(project, tasks, proposals):
                     st.caption("Review the document, then let us know your decision.")
                     col_accept, col_reject, _ = st.columns([1, 1, 3])
                     with col_accept:
-                        if st.button("✅ Accept", key=f"accept_{prop['id']}", type="primary", use_container_width=True):
+                        if st.button("Accept", key=f"accept_{prop['id']}", type="primary", width="stretch"):
                             update_proposal_status(prop["id"], PROPOSAL_APPROVED)
                             st.rerun()
                     with col_reject:
-                        if st.button("❌ Reject", key=f"reject_{prop['id']}", use_container_width=True):
+                        if st.button("Reject", key=f"reject_{prop['id']}", width="stretch"):
                             update_proposal_status(prop["id"], PROPOSAL_REJECTED)
                             st.rerun()
                 elif prop["status"] == PROPOSAL_APPROVED:
@@ -174,7 +248,7 @@ def render_overview(project, tasks, proposals):
                     st.caption("You rejected this proposal. Your account manager will follow up.")
 
     st.write("")
-    st.write("#### Project Summary")
+    section("Project Summary")
 
     done_count = len([t for t in tasks if t.get("status") == "done"])
     col1, col2, col3 = st.columns(3)

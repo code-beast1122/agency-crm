@@ -20,23 +20,27 @@ from utils.db import (
     sync_task_deadline,
     sync_profile_role
 )
+from views.meetings import render_meetings
+from views.credentials import show_credentials
+from utils.theme import empty_state, entity_card, page_header, section
 import uuid
 
 def render(user):
-    st.header("🎯 Coordinator Portal")
-    
+    page_header("Coordinator Portal", "Clients, dispatch and delivery")
+
     active_tab = st.radio("Coordinator Navigation", [
-        "🤝 Client Onboarding", 
-        "📬 Task Dispatcher", 
-        "📈 Projects Overview", 
-        "👥 Team Management",
-        "📝 Weekly Report",
-        "🤖 AI Assistant"
+        "Client Onboarding", 
+        "Task Dispatcher", 
+        "Projects Overview",
+        "Meetings",
+        "Team Management",
+        "Weekly Report",
+        "AI Assistant"
     ], horizontal=True, label_visibility="collapsed")
     
     st.divider()
     
-    if active_tab == "🤝 Client Onboarding":
+    if active_tab == "Client Onboarding":
         st.subheader("Client Management")
         
         onboarding_tabs = st.tabs(["Onboard New Client", "Add Project for Existing Client"])
@@ -87,7 +91,8 @@ def render(user):
                                 public_url = supabase.storage.from_("documents").get_public_url(file_name)
                                 create_proposal(project["id"], public_url)
                                 
-                            st.success(f"Successfully onboarded {company_name}! Their access code is: {profile['login_code']}")
+                            st.success(f"Successfully onboarded {company_name}!")
+                            show_credentials(profile)
                         except Exception as e:
                             st.error(f"Error during onboarding: {str(e)}")
                             
@@ -133,7 +138,7 @@ def render(user):
             else:
                 st.info("No clients exist yet. Please onboard a client first.")
                         
-    elif active_tab == "📬 Task Dispatcher":
+    elif active_tab == "Task Dispatcher":
         st.subheader("Global Task Dispatcher")
         
         st.write("### Create Internal Task")
@@ -273,7 +278,7 @@ def render(user):
                             st.success("Task updated.")
                             st.rerun()
 
-    elif active_tab == "📈 Projects Overview":
+    elif active_tab == "Projects Overview":
         st.subheader("Projects Overview")
         projects = get_all_projects()
         
@@ -321,18 +326,30 @@ def render(user):
         else:
             st.info("No projects yet.")
 
-    elif active_tab == "👥 Team Management":
-        st.subheader("👥 Team Management")
-        st.write("View HODs and their departments.")
+    elif active_tab == "Meetings":
+        render_meetings(user)
+
+    elif active_tab == "Team Management":
         hods = get_hods_with_departments()
+        section(
+            "Heads of Department",
+            f"{len(hods)} HODs you can dispatch work to" if hods else "Who you can dispatch work to"
+        )
         if hods:
             for hod in hods:
-                st.markdown(f"- **{hod['profiles']['full_name']}** (HOD of {hod['departments']['name']})")
+                entity_card(
+                    hod["profiles"]["full_name"],
+                    subtitle=f"HOD of {hod['departments']['name']}",
+                    meta=hod["departments"]["name"]
+                )
         else:
-            st.info("No HODs assigned yet.")
+            empty_state(
+                "No HODs assigned yet",
+                "An admin assigns the HOD role under Team Management."
+            )
             
-    elif active_tab == "📝 Weekly Report":
-        st.subheader("📝 Weekly Report")
+    elif active_tab == "Weekly Report":
+        st.subheader("Weekly Report")
         with st.form("weekly_report_form"):
             goals = st.text_area("Goals Hit This Week")
             blockers = st.text_area("Blockers & Issues")
@@ -352,7 +369,7 @@ def render(user):
                 else:
                     st.error("You are not registered in the coordinators table.")
                     
-    elif active_tab == "🤖 AI Assistant":
-        st.subheader("🤖 AI Data Analyst")
+    elif active_tab == "AI Assistant":
+        st.subheader("AI Data Analyst")
         st.info("AI Chat coming soon to Coordinator Portal.")
 

@@ -1,0 +1,36 @@
+[theme]
+# Pinned, not merely defaulted. The app's CSS hardcodes dark surfaces, so a
+# viewer whose browser reports light mode would get dark panels on a white page.
+base = "dark"
+
+primaryColor = "#0ea5e9"
+backgroundColor = "#0f1117"
+secondaryBackgroundColor = "#171a23"
+textColor = "#e6edf6"
+linkColor = "#38bdf8"
+borderColor = "#262b38"
+dataframeBorderColor = "#262b38"
+dataframeHeaderBackgroundColor = "#1d2130"
+codeBackgroundColor = "#10131b"
+
+# Prefer these over hand-written CSS wherever they cover the same ground: they
+# are a supported API, whereas CSS aimed at Streamlit's internal data-testid
+# names silently stops applying when the frontend renames one.
+baseRadius = "14px"
+buttonRadius = "10px"
+showWidgetBorder = true
+showSidebarBorder = true
+
+font = "sans serif"
+headingFontWeights = [800, 700, 700, 700, 600, 600]
+metricValueFontSize = "1.9rem"
+metricValueFontWeight = 800
+
+[theme.sidebar]
+backgroundColor = "#12151d"
+borderColor = "#262b38"
+secondaryBackgroundColor = "#1d2130"
+
+[client]
+toolbarMode = "minimal"
+showSidebarNavigation = false
